@@ -38,7 +38,7 @@ from acmenra_ds.augmentation import (
 
 
 YAML_PATH = "/Users/stepanborodin/Downloads/indastrial/data.yaml"
-WAIT_MS = 0          # 0 = смотришь каждый кадр, 30 = автоплей
+WAIT_MS = 0   # 0 = смотришь каждый кадр, 30 = автоплей
 PREVIEW_H = 720
 SAVE_DIR = Path(os.getcwd()) / "aug_preview"
 
@@ -49,6 +49,9 @@ logger = logging.getLogger(__name__)
 file_handler = logging.FileHandler(os.path.join(os.getcwd(), "logs", "logs.log"))
 file_handler.setFormatter(logging.Formatter(formatter))
 logger.root.addHandler(file_handler)
+
+# brew services start postgresql@15 # старт БД-хи
+# brew services stop postgresql@15
 
 
 style = Style(palette=np.random.randint(0, 255, (80, 3)).tolist(), # Задаем стиль
