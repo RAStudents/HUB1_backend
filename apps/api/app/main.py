@@ -1,9 +1,11 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
 from core.infrastructure.sql.base import init_db
+from fastapi.staticfiles import StaticFiles
 
 
 
@@ -13,6 +15,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+STORAGE_DIR = "storage"
+os.makedirs(STORAGE_DIR, exist_ok=True)
+app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
 
 # Настройка CORS для фронтенда
 app.add_middleware(

@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, status
 from apps.api.app.deps import get_dataset_service, CurrentUser, get_current_user
 from core.application.dataset_service import DatasetService
 from core.domain.enums import TaskTypeEnum
+from fastapi import APIRouter, Query, HTTPException
+from core.application.visualizer import build_dataset_gallery
+
+
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -24,3 +28,25 @@ def create_dataset(
         initial_classes=payload.get("classes")
     )
     return {"dataset_id": dataset_id, "message": "Датасет успешно создан"}
+
+
+
+router = APIRouter(prefix="/datasets", tags=["Datasets"])
+
+@router.get("/{dataset_id}/gallery")
+async def get_dataset_gallery(
+    dataset_id: int,
+    yaml_path: str = Query(..., description="Абсолютный путь к data.yaml на компьютере"),
+    split: str = Query("train", description="train, val или test"),
+    limit: int = Query(50)
+):
+    try:
+        items = build_dataset_gallery(
+            dataset_id=dataset_id,
+            yaml_path=yaml_path,
+            split_name=split,
+            limit=limit
+        )
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
