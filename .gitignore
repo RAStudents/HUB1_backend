@@ -226,3 +226,10 @@ __pycache__/
 venv/
 .idea/
 .vscode/
+media/
+uploads/
+*.zip
+temp/
+__pycache__/
+.venv/
+local_s3_storage/
