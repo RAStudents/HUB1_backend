@@ -31,6 +31,20 @@ DEFAULT_PALETTE: List[tuple] = [
 ]
 
 
+def read_image_unicode(image_path: Path) -> np.ndarray | None:
+    """Надежное чтение изображений на Windows с поддержкой Unicode/кириллицы в путях."""
+    try:
+        path_obj = Path(image_path)
+        if not path_obj.exists():
+            return None
+        stream = np.fromfile(str(path_obj), dtype=np.uint8)
+        if stream.size == 0:
+            return None
+        return cv2.imdecode(stream, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
 def build_default_style() -> Style:
     """Собирает стиль отрисовки для превьюшек галереи."""
     return Style(
@@ -79,11 +93,14 @@ def render_thumbnail_bytes(
     jpeg_quality: int = 85,
 ) -> bytes:
     """
-    Читает картинку через ImageParser, рисует маски через Drawer
-    и возвращает готовые JPEG-байты для загрузки в S3 (MinIO).
+    Читает картинку с поддержкой Unicode-путей (и фоллбэком на ImageParser),
+    рисует маски через Drawer и возвращает готовые JPEG-байты для загрузки в S3 (MinIO).
     """
-    parser = ImageParser()
-    frame = parser.parse(path=image_path, is_strict=True)
+    frame = read_image_unicode(image_path)
+    if frame is None:
+        parser = ImageParser()
+        frame = parser.parse(path=image_path, is_strict=False)
+
     if frame is None:
         raise ValueError(f"Не удалось прочитать изображение: {image_path}")
 

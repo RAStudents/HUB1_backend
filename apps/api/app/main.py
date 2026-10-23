@@ -1,13 +1,11 @@
-import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
 from core.infrastructure.sql.base import init_db
-from fastapi.staticfiles import StaticFiles
-
-
 
 app = FastAPI(
     title="HUB Dataset Annotation Platform (MVP)",
@@ -16,9 +14,10 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-STORAGE_DIR = "storage"
-os.makedirs(STORAGE_DIR, exist_ok=True)
-app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
+# Гарантируем создание папки storage и раздачу статики для превью и масок
+STORAGE_DIR = Path("storage")
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/storage", StaticFiles(directory=str(STORAGE_DIR)), name="storage")
 
 # Настройка CORS для фронтенда
 app.add_middleware(
@@ -35,9 +34,15 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 def startup_event():
-    """Действия при старте приложения: проверка/создание S3 бакета."""
-    s3 = get_s3_client()
+    """Действия при старте приложения: инициализация БД и проверка S3 бакета."""
     try:
+        init_db()
+        print("✅ Инициализация БД выполнена.")
+    except Exception as exc:
+        print(f"⚠️ Ошибка инициализации БД при старте: {exc}")
+
+    try:
+        s3 = get_s3_client()
         s3.ensure_bucket()
         print("✅ Успешное подключение к S3 (MinIO), бакет готов к работе.")
     except Exception as exc:
@@ -48,13 +53,3 @@ def startup_event():
 def health_check():
     """Эндпоинт проверки работоспособности сервиса."""
     return {"status": "ok", "service": "hub-backend-mvp"}
-
-@app.on_event("startup")
-def startup_event():
-    init_db()
-    s3 = get_s3_client()
-    try:
-        s3.ensure_bucket()
-        print("✅ Успешное подключение к S3 и инициализация БД выполнены.")
-    except Exception as exc:
-        print(f"⚠️ Ошибка при старте: {exc}")

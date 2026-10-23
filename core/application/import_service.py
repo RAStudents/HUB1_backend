@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from typing import Any, List
 import yaml
@@ -11,6 +12,34 @@ from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
+STORAGE_DIR = Path("storage")
+
+
+def resolve_dataset_root(root: Path) -> Path:
+    """
+    Если архив распаковался с вложенной корневой папкой (например, archive/my_dataset/data.yaml),
+    автоматически спускается до реального корня датасета.
+    """
+    for name in ("data.yaml", "dataset.yaml", "config.yaml"):
+        if (root / name).is_file():
+            return root
+    if any((root / s).is_dir() for s in ("train", "val", "valid", "test", "images")):
+        return root
+
+    # Ищем yaml или сплиты глубже по дереву
+    for yaml_name in ("data.yaml", "dataset.yaml", "config.yaml"):
+        found = list(root.rglob(yaml_name))
+        if found:
+            return found[0].parent
+
+    for split_dir in ("train", "valid", "val"):
+        found_splits = [p for p in root.rglob(split_dir) if p.is_dir()]
+        if found_splits:
+            parent = found_splits[0].parent
+            return parent.parent if parent.name == "images" else parent
+
+    return root
+
 
 def detect_layout(root: Path) -> DatasetLayout:
     """
@@ -18,6 +47,7 @@ def detect_layout(root: Path) -> DatasetLayout:
     - DIRECT: root / train / images  (или valid/images, test/images)
     - REVERSE: root / images / train
     """
+    root = resolve_dataset_root(root)
     if (root / "images").is_dir() and any(
         (root / "images" / s).is_dir() for s in ("train", "val", "valid", "test")
     ):
@@ -26,7 +56,8 @@ def detect_layout(root: Path) -> DatasetLayout:
 
 
 def find_yaml_file(root: Path) -> Path | None:
-    """Ищет конфигурационный yaml-файл в корне датасета."""
+    """Ищет конфигурационный yaml-файл в корне датасета (с учетом вложенности)."""
+    root = resolve_dataset_root(root)
     for name in ("data.yaml", "dataset.yaml", "config.yaml"):
         candidate = root / name
         if candidate.is_file():
@@ -44,6 +75,7 @@ def build_acmenra_dataset(
     Создаёт объект Dataset из acmenra-ds, автоматически определяя раскладку
     (DIRECT / REVERSE) и подтягивая имена классов из yaml (если он есть).
     """
+    root = resolve_dataset_root(root)
     layout = detect_layout(root)
     yaml_path = find_yaml_file(root)
 
@@ -93,7 +125,7 @@ class ImportService:
     ) -> dict:
         """
         Полный цикл импорта архива:
-        1. Распаковывает zip во временную папку (scratch_dir).
+        1. Распаковывает zip во временную папку и копирует в локальный storage для быстрого preview/overlay.
         2. Инициализирует acmenra_ds.Dataset.
         3. Проходит циклом по train / val / test.
         4. Парсит разметку, генерирует превью с масками (thumbs.py) и заливает в S3 + БД.
@@ -102,13 +134,30 @@ class ImportService:
         errors_count = 0
 
         with scratch_dir(prefix=f"import_ds_{dataset_id}_") as tmp_dir:
-            root = extract_zip_safely(zip_source, tmp_dir)
+            raw_root = extract_zip_safely(zip_source, tmp_dir)
+            root = resolve_dataset_root(raw_root)
+
+            # Сохраняем распакованный датасет в storage/dataset_{id}/raw для работы локальной галереи и overlay
+            persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
+            if persistent_raw_dir.exists():
+                shutil.rmtree(persistent_raw_dir, ignore_errors=True)
+            persistent_raw_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(root, persistent_raw_dir, dirs_exist_ok=True)
+
             ds = build_acmenra_dataset(root=root, task=task, fallback_names=existing_classes)
 
             # Если в датасете были классы в data.yaml — синхронизируем их с БД
             class_names = ds.names or existing_classes or []
             if class_names and self.classes is not None:
                 self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
+
+            # Если в архиве не было data.yaml, создаем его в persistent_raw_dir для визуализатора
+            if find_yaml_file(persistent_raw_dir) is None:
+                fallback_yaml = persistent_raw_dir / "data.yaml"
+                fallback_yaml.write_text(
+                    yaml.safe_dump({"names": class_names, "task": task.value}, allow_unicode=True),
+                    encoding="utf-8",
+                )
 
             # Цикл поочерёдно по train / val / test, как требуется в задаче
             for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST):
@@ -139,8 +188,9 @@ class ImportService:
                     img_bytes, img_filename, content_type = normalize_image_file(sample.image_path)
 
                     # 3. Рисуем превьюшку с масками/боксами через Drawer (thumbs.py)
-                    # Для кривых форматов сохраняем нормализованный jpg во временный файл перед чтением ImageParser
-                    norm_img_path = tmp_dir / img_filename
+                    # Используем чистое ASCII-имя для временного файла, чтобы OpenCV на Windows не падал на кириллице
+                    ext = Path(img_filename).suffix or ".jpg"
+                    norm_img_path = tmp_dir / f"_tmp_thumb_{idx}{ext}"
                     norm_img_path.write_bytes(img_bytes)
                     thumb_bytes = render_thumbnail_bytes(
                         image_path=norm_img_path,
@@ -184,4 +234,5 @@ class ImportService:
             "imported_samples": imported_count,
             "parse_errors": errors_count,
             "classes": class_names,
+            "local_gallery_ready": True,
         }
