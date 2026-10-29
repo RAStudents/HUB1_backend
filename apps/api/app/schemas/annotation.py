@@ -1,3 +1,4 @@
+﻿# apps/api/app/schemas/annotation.py
 from typing import List, Optional
 from pydantic import BaseModel, Field
 

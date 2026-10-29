@@ -1,12 +1,13 @@
+# core/infrastructure/cv/thumbs.py
 from pathlib import Path
 from typing import List
+
 import cv2
 import numpy as np
-
 from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 from acmenra_ds import ImageParser
 
-# Базовая контрастная палитра (RGB/BGR кортежи для классов)
+# Контрастная палитра для раскраски классов (RGB/BGR кортежи)
 DEFAULT_PALETTE: List[tuple] = [
     (255, 56, 56),
     (255, 157, 151),
@@ -32,7 +33,10 @@ DEFAULT_PALETTE: List[tuple] = [
 
 
 def read_image_unicode(image_path: Path) -> np.ndarray | None:
-    """Надежное чтение изображений на Windows с поддержкой Unicode/кириллицы в путях."""
+    """
+    Надёжное чтение изображения с поддержкой Unicode/кириллицы в пути (Windows).
+    Возвращает None если файл не существует или не может быть декодирован.
+    """
     try:
         path_obj = Path(image_path)
         if not path_obj.exists():
@@ -46,7 +50,7 @@ def read_image_unicode(image_path: Path) -> np.ndarray | None:
 
 
 def build_default_style() -> Style:
-    """Собирает стиль отрисовки для превьюшек галереи."""
+    """Собирает стандартный стиль отрисовки для превьюшек галереи."""
     return Style(
         palette=DEFAULT_PALETTE,
         font=Font(color=(255, 255, 255), font=1, font_scale=2, thickness=2),
@@ -67,7 +71,8 @@ def render_thumbnail_array(
     style: Style | None = None,
 ) -> np.ndarray:
     """
-    Рисует инстансы (бокс, OBB или полигон/маску) на матрице изображения через Drawer.
+    Рисует инстансы (бокс, OBB или полигон) на матрице изображения через Drawer.
+    Возвращает копию кадра без изменений, если список инстансов пуст.
     """
     if not instances:
         return frame.copy()
@@ -75,7 +80,7 @@ def render_thumbnail_array(
     active_style = style or build_default_style()
     drawer = Drawer(style=active_style)
 
-    # Включаем отрисовку только нужного примитива, чтобы не рисовать плейсхолдер-бокс!
+    # Включаем только нужный примитив, чтобы не рисовать плейсхолдер-бокс
     return drawer.draw_instances(
         frame=frame.copy(),
         instances=instances,
@@ -93,8 +98,8 @@ def render_thumbnail_bytes(
     jpeg_quality: int = 85,
 ) -> bytes:
     """
-    Читает картинку с поддержкой Unicode-путей (и фоллбэком на ImageParser),
-    рисует маски через Drawer и возвращает готовые JPEG-байты для загрузки в S3 (MinIO).
+    Читает изображение (с поддержкой Unicode-путей и фоллбэком на ImageParser),
+    рисует маски через Drawer и возвращает готовые JPEG-байты для загрузки в S3.
     """
     frame = read_image_unicode(image_path)
     if frame is None:
@@ -110,6 +115,6 @@ def render_thumbnail_bytes(
         ".jpg", rendered, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
     )
     if not success:
-        raise RuntimeError(f"Ошибка кодирования превью в JPEG для {image_path}")
+        raise RuntimeError(f"Ошибка кодирования превью в JPEG: {image_path}")
 
     return encoded.tobytes()

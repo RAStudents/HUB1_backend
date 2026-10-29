@@ -1,6 +1,9 @@
+# core/application/dataset_service.py
 from typing import Any, List
-from acmenra_cv import TaskType
+
 from core.domain.enums import TaskTypeEnum
+
+_DEFAULT_CLASSES = ["object_a", "object_b"]
 
 
 class DatasetService:
@@ -12,35 +15,33 @@ class DatasetService:
     def create_dataset(
         self,
         name: str,
-        task: Any,  # Изменяем аннотацию типа на Any или принимаем строку
+        task: Any,
         owner_id: int,
         description: str | None = None,
         is_private: bool = True,
         initial_classes: List[str] | None = None,
     ) -> int:
-        """Создает датасет, привязывает владельца и сохраняет дефолтный список классов."""
-        
-        # Безопасно преобразуем task в чистую строку значения ('detect', 'obb', 'segment')
-        if hasattr(task, "value"):
-            task_value = task.value
-        else:
-            task_str = str(task)
-            task_value = task_str.split(".")[-1].lower()
+        """
+        Создаёт датасет, привязывает владельца и сохраняет список классов.
+
+        Принимает task как строку или Enum и нормализует к чистому строковому значению
+        ('detect', 'obb', 'segment') перед сохранением в БД.
+        """
+        task_value = task.value if hasattr(task, "value") else str(task).split(".")[-1].lower()
 
         dataset_id = self.datasets.create(
             name=name,
-            task=task_value,  # Передаем чистую строку в репозиторий
+            task=task_value,
             owner_id=owner_id,
             description=description,
             is_private=is_private,
         )
 
-        # Сохраняем классы (если переданы, иначе дефолтные)
-        classes = initial_classes or ["object_a", "object_b"]
+        classes = initial_classes or _DEFAULT_CLASSES
         self.classes.ensure_classes(dataset_id=dataset_id, names=classes)
 
         return dataset_id
 
     def list_user_datasets(self, user_id: int) -> list:
-        """Возвращает датасеты, к которым у пользователя есть доступ (мои и доступные)."""
+        """Возвращает id датасетов, к которым у пользователя есть доступ."""
         return self.memberships.list_datasets_for_user(user_id=user_id)

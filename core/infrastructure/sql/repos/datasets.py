@@ -1,26 +1,39 @@
+# core/infrastructure/sql/repos/datasets.py
 from core.infrastructure.sql.schema import datasets_table, memberships_table
+
 
 class DatasetRepository:
     def __init__(self, db_conn):
         self.db = db_conn
 
-    def create(self, name: str, task: str, owner_id: int, description: str | None = None, is_private: bool = True) -> int:
-        query = datasets_table.insert().values(
+    def create(
+        self,
+        name: str,
+        task: str,
+        owner_id: int,
+        description: str | None = None,
+        is_private: bool = True,
+    ) -> int:
+        """
+        Создаёт датасет и автоматически добавляет владельца
+        в таблицу участников с ролью 'owner'.
+        """
+        dataset_query = datasets_table.insert().values(
             name=name,
             task=str(task),
             description=description,
             is_private=is_private,
-            owner_id=owner_id
+            owner_id=owner_id,
         )
-        result = self.db.execute(query)
+        result = self.db.execute(dataset_query)
         dataset_id = result.inserted_primary_key[0]
 
-        # Автоматически добавляем владельца в таблицу участников с ролью owner
-        self.db.execute(memberships_table.insert().values(
+        membership_query = memberships_table.insert().values(
             dataset_id=dataset_id,
             user_id=owner_id,
-            role="owner"
-        ))
+            role="owner",
+        )
+        self.db.execute(membership_query)
         self.db.commit()
         return dataset_id
 

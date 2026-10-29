@@ -1,3 +1,4 @@
+﻿# core/domain/event.py
 from datetime import datetime, timezone
 
 

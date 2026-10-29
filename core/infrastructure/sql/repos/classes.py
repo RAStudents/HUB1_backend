@@ -1,25 +1,31 @@
+# core/infrastructure/sql/repos/classes.py
 from core.infrastructure.sql.schema import classes_table
+
 
 class ClassRepository:
     def __init__(self, db_conn):
         self.db = db_conn
 
     def ensure_classes(self, dataset_id: int, names: list[str]) -> None:
-        # Удаляем старые классы датасета
-        self.db.execute(classes_table.delete().where(classes_table.c.dataset_id == dataset_id))
-        
-        # Вставляем новые, передавая class_index вместо id
+        """
+        Синхронизирует классы датасета с переданным списком:
+        удаляет старые записи и вставляет актуальные.
+        """
+        self.db.execute(
+            classes_table.delete().where(classes_table.c.dataset_id == dataset_id)
+        )
         for idx, name in enumerate(names):
             self.db.execute(
                 classes_table.insert().values(
                     dataset_id=dataset_id,
-                    class_index=idx,  # <--- Исправлено с id на class_index
-                    name=name
+                    class_index=idx,
+                    name=name,
                 )
             )
         self.db.commit()
 
     def get_names(self, dataset_id: int) -> list[str]:
+        """Возвращает список имён классов датасета в порядке class_index."""
         query = classes_table.select().where(classes_table.c.dataset_id == dataset_id)
         rows = self.db.execute(query).fetchall()
         return [row.name for row in rows]

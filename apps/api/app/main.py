@@ -1,4 +1,7 @@
+# apps/api/app/main.py
+import logging
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,6 +10,8 @@ from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
 from core.infrastructure.sql.base import init_db
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="HUB Dataset Annotation Platform (MVP)",
     version="1.0.0",
@@ -14,12 +19,12 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Гарантируем создание папки storage и раздачу статики для превью и масок
+# Раздача статических файлов (превью и маски)
 STORAGE_DIR = Path("storage")
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=str(STORAGE_DIR)), name="storage")
 
-# Настройка CORS для фронтенда
+# CORS для фронтенда
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,25 +33,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключаем общий API-роутер
 app.include_router(api_router)
 
 
 @app.on_event("startup")
 def startup_event():
-    """Действия при старте приложения: инициализация БД и проверка S3 бакета."""
+    """Инициализирует БД и проверяет доступность S3 при старте приложения."""
     try:
         init_db()
-        print("✅ Инициализация БД выполнена.")
+        print("[OK] Инициализация БД выполнена.")
     except Exception as exc:
-        print(f"⚠️ Ошибка инициализации БД при старте: {exc}")
+        print(f"[ERROR] Ошибка инициализации БД при старте: {exc}")
 
     try:
         s3 = get_s3_client()
         s3.ensure_bucket()
-        print("✅ Успешное подключение к S3 (MinIO), бакет готов к работе.")
+        print("[OK] S3 (MinIO) подключен, бакет готов.")
     except Exception as exc:
-        print(f"⚠️ Внимание: не удалось подключиться к S3 при старте: {exc}")
+        print(f"[WARNING] Не удалось подключиться к S3 при старте: {exc}")
 
 
 @app.get("/health", tags=["system"])

@@ -1,3 +1,6 @@
+# core/infrastructure/s3/keys.py
+
+
 def image_key(dataset_id: int, split: str, filename: str) -> str:
     """Ключ оригинала изображения в S3."""
     return f"datasets/{dataset_id}/{split}/images/{filename}"
@@ -9,7 +12,7 @@ def label_key(dataset_id: int, split: str, stem: str) -> str:
 
 
 def thumb_key(dataset_id: int, split: str, stem: str) -> str:
-    """Ключ превьюшки с отрисованными масками (тумбы) в S3."""
+    """Ключ превьюшки с отрисованными масками в S3."""
     return f"datasets/{dataset_id}/{split}/thumbs/{stem}.jpg"
 
 

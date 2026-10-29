@@ -230,6 +230,5 @@ media/
 uploads/
 *.zip
 temp/
-__pycache__/
 .venv/
 local_s3_storage/

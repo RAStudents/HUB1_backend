@@ -1,3 +1,4 @@
+# core/infrastructure/cv/mapper.py
 import math
 from typing import List, Sequence
 
@@ -14,9 +15,10 @@ from core.infrastructure.cv.labels import build_category_enum
 
 def instance_to_dto(instance: Instance, task: TaskType) -> AnnotationItemDTO:
     """
-    Переводит Instance из acmenra-cv в DTO для API.
-    Плейсхолдер-бокс для OBB и SEGMENT наружу НЕ отдаётся!
-    Угол OBB переводится из радиан в градусы.
+    Конвертирует Instance из acmenra-cv в DTO для API.
+
+    - Плейсхолдер-бокс для OBB и SEGMENT наружу не отдаётся.
+    - Угол OBB переводится из радиан в градусы.
     """
     box_dto = None
     obb_dto = None
@@ -56,14 +58,13 @@ def dto_to_instance(
 ) -> Instance:
     """
     Собирает Instance из DTO фронтенда для сохранения в .txt и отрисовки Drawer-ом.
-    Для OBB и SEGMENT создаёт технический пустой Box(), как того требует конструктор Instance.
-    Угол OBB переводится из градусов в радианы.
+
+    - Для OBB и SEGMENT создаёт технический пустой Box() (требование конструктора Instance).
+    - Угол OBB переводится из градусов в радианы.
     """
     category_enum = build_category_enum(class_names)
     members_by_val = {item.value: item for item in category_enum}
     label_enum = members_by_val.get(dto.class_id, list(category_enum)[0])
-
-    # Плейсхолдер-бокс по умолчанию (обязателен для Instance.__init__)
     placeholder_box = Box()
 
     if task == TaskType.DETECT and dto.box is not None:
@@ -110,6 +111,7 @@ def dto_to_instance(
 
 
 def instances_to_dtos(instances: List[Instance], task: TaskType) -> List[AnnotationItemDTO]:
+    """Конвертирует список Instance в список DTO."""
     return [instance_to_dto(inst, task) for inst in instances]
 
 
@@ -118,4 +120,5 @@ def dtos_to_instances(
     task: TaskType,
     class_names: Sequence[str],
 ) -> List[Instance]:
+    """Конвертирует список DTO в список Instance."""
     return [dto_to_instance(d, task, class_names) for d in dtos]

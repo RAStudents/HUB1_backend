@@ -1,3 +1,4 @@
+﻿# core/domain/annotation.py
 class AnnotationMetadata:
     def __init__(
         self,

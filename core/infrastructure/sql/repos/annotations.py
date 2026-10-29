@@ -1,3 +1,4 @@
+# core/infrastructure/sql/repos/annotations.py
 from core.infrastructure.sql.schema import annotations_table
 
 
@@ -6,17 +7,20 @@ class AnnotationRepository:
         self.db = db_conn
 
     def replace_sample_annotations(
-        self, sample_id: int, class_ids: list[int], user_id: int
+        self,
+        sample_id: int,
+        class_ids: list[int],
+        user_id: int,
     ) -> None:
-        """Удаляет старые аннотации кадра и записывает актуальные из редактора."""
-        # 1. Удаляем предыдущие записи для этого сэмпла
+        """
+        Атомарно заменяет аннотации кадра:
+        удаляет старые записи и вставляет актуальные из редактора.
+        """
         self.db.execute(
             annotations_table.delete().where(
                 annotations_table.c.sample_id == sample_id
             )
         )
-
-        # 2. Вставляем новые инстансы с указанием автора
         for class_id in class_ids:
             self.db.execute(
                 annotations_table.insert().values(

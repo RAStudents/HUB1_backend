@@ -1,3 +1,4 @@
+# core/infrastructure/cv/labels.py
 from enum import Enum
 from pathlib import Path
 from typing import List, Sequence
@@ -8,19 +9,22 @@ from acmenra_ds import LabelParser, LabelWriter
 
 def build_category_enum(class_names: Sequence[str]) -> type[Enum]:
     """
-    Создаёт динамический Enum для acmenra-ds / acmenra-cv.
-    Если список классов пуст, создаёт технический класс, чтобы парсер не падал на пустых файлах.
+    Создаёт динамический Enum категорий для acmenra-ds / acmenra-cv.
+    Если список классов пуст — создаёт технический класс-заглушку,
+    чтобы парсер не падал на пустых файлах разметки.
     """
     if not class_names:
         return Enum("DatasetCategory", {"_EMPTY": 0})
-    
-    # Ключи Enum не могут дублироваться или быть пустыми, подстраховываемся индексом при коллизиях
-    members = {}
+
+    # Ключи Enum не могут дублироваться или быть пустыми —
+    # при коллизии добавляем числовой суффикс
+    members: dict[str, int] = {}
     for idx, name in enumerate(class_names):
         safe_key = name.strip() or f"CLASS_{idx}"
         if safe_key in members:
             safe_key = f"{safe_key}_{idx}"
         members[safe_key] = idx
+
     return Enum("DatasetCategory", members)
 
 
@@ -32,7 +36,7 @@ def parse_label_file(
 ) -> List[Instance]:
     """
     Читает YOLO .txt файл и возвращает список Instance.
-    Пустой файл или отсутствие файла корректно возвращает [].
+    Пустой файл или отсутствующий файл корректно возвращает [].
     """
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -52,9 +56,10 @@ def write_label_file(
 ) -> None:
     """
     Записывает список Instance в YOLO .txt файл.
-    Если instances пуст — создаёт пустой .txt файл (согласно DATA_CONTRACT.md).
+    Если instances пуст — создаёт пустой .txt (согласно DATA_CONTRACT.md).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+
     if not instances:
         path.write_text("", encoding="utf-8")
         return

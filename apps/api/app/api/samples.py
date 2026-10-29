@@ -1,8 +1,10 @@
+# apps/api/app/api/samples.py
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from acmenra_cv import TaskType
+
 from apps.api.app.deps import (
     CurrentUser,
     get_current_user,
@@ -32,7 +34,7 @@ router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["samples"])
 @router.get("", response_model=GalleryPageDTO)
 def list_gallery_samples(
     dataset_id: int,
-    split: Optional[str] = Query(None, description="train | val | test | None (All)"),
+    split: Optional[str] = Query(None, description="train | val | test | None (все)"),
     sample_status: Optional[str] = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
@@ -42,12 +44,14 @@ def list_gallery_samples(
     sample_repo=Depends(get_sample_repo),
 ) -> GalleryPageDTO:
     """
-    Галерея кадров: фильтрация по сплиту (All / Train / Val / Test) и статусу.
-    Для каждой карточки генерирует presigned URL на чистый кадр и на тумбу с масками.
+    Галерея кадров с фильтрацией по сплиту и статусу.
+    Генерирует presigned URL на оригинал и превью (тумбу с масками) для каждой карточки.
     """
+    normalized_split = split.lower() if split and split.lower() != "all" else None
+
     total, rows = sample_repo.paginate(
         dataset_id=dataset_id,
-        split=split.lower() if split and split.lower() != "all" else None,
+        split=normalized_split,
         status=sample_status,
         offset=(page - 1) * page_size,
         limit=page_size,
@@ -69,7 +73,6 @@ def list_gallery_samples(
         )
         for row in rows
     ]
-
     return GalleryPageDTO(total=total, page=page, page_size=page_size, items=items)
 
 
@@ -81,7 +84,7 @@ async def import_dataset_zip(
     dataset=Depends(get_dataset_or_404),
     import_service: ImportService = Depends(get_import_service),
 ) -> dict:
-    """Принимает ZIP с датасетом, проходит по train/val/test и рисует все тумбы с масками."""
+    """Принимает ZIP с датасетом, проходит по train/val/test и строит все превью с масками."""
     zip_bytes = await file.read()
     try:
         return import_service.import_zip(
@@ -100,7 +103,7 @@ def get_upload_url(
     user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
     s3: S3Client = Depends(get_s3_client),
 ) -> UploadUrlResponse:
-    """Выдаёт presigned PUT ссылку для прямой загрузки сырого кадра во временный префикс S3."""
+    """Выдаёт presigned PUT ссылку для прямой загрузки кадра во временный префикс S3."""
     raw_key = f"datasets/{dataset_id}/_incoming/{req.split.lower()}/{req.filename}"
     url = s3.get_presigned_upload_url(key=raw_key, content_type=req.content_type)
     return UploadUrlResponse(upload_key=raw_key, upload_url=url)
@@ -116,13 +119,12 @@ def complete_upload(
     sample_repo=Depends(get_sample_repo),
 ) -> SampleCardDTO:
     """
-    Завершение загрузки одиночного кадра (`upload_service.py` логика):
-    догружает байты из _incoming, конвертирует (heic/webp -> jpg), создаёт пустой .txt,
-    тумбу и заводит сэмпл в БД.
+    Завершает загрузку одиночного кадра:
+    конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.
     """
     raw_bytes = s3.get_bytes(req.upload_key)
     if not raw_bytes:
-        raise HTTPException(status_code=404, detail="Загруженный файл не найден в S3")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Загруженный файл не найден в S3")
 
     orig_name = Path(req.upload_key).name
     split_name = req.split.lower()
@@ -178,10 +180,10 @@ def delete_sample(
     s3: S3Client = Depends(get_s3_client),
     sample_repo=Depends(get_sample_repo),
 ) -> None:
-    """Удаляет сэмпл из БД и чистит его оригинал, .txt и тумбу из S3."""
+    """Удаляет сэмпл из БД и чистит его файлы (оригинал, .txt, превью) из S3."""
     row = sample_repo.get_by_id(dataset_id=dataset_id, sample_id=sample_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="Кадр не найден")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Кадр не найден")
 
     s3.delete_many([row.image_key, row.label_key, row.thumb_key])
     sample_repo.delete(sample_id=sample_id)

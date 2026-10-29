@@ -1,3 +1,4 @@
+# core/application/annotation_service.py
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
@@ -36,10 +37,9 @@ class AnnotationService:
         task: TaskType,
     ) -> FrameAnnotationsDTO:
         """
-        Отдаёт разметку кадра фронтенду:
-        проверяет доступ -> качает .txt из S3 -> парсит через cv -> возвращает DTO (в градусах).
+        Возвращает разметку кадра фронтенду:
+        проверяет доступ → скачивает .txt из S3 → парсит через acmenra-cv → возвращает DTO.
         """
-        # 1. Проверяем, что пользователь состоит в датасете (любая роль: owner/labeler/observer)
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role is None:
             raise PermissionError("Доступ к датасету запрещён")
@@ -53,12 +53,10 @@ class AnnotationService:
             dataset_id, sample.split, sample.stem
         )
 
-        # 2. Скачиваем .txt из S3 (если файла нет или он пустой — отдаём пустой список)
         raw_txt = self.s3.get_bytes(s3_lbl_key)
         if not raw_txt:
             return FrameAnnotationsDTO(sample_id=sample_id, items=[])
 
-        # 3. Парсим через временный файл и LabelParser
         with scratch_file(suffix=".txt", data=raw_txt) as tmp_txt:
             instances = parse_label_file(
                 path=tmp_txt,
@@ -79,13 +77,12 @@ class AnnotationService:
         items: List[AnnotationItemDTO],
     ) -> FrameAnnotationsDTO:
         """
-        Принимает сохранение из редактора:
+        Сохраняет разметку из редактора:
         1. Проверяет роль (owner | labeler) и активный lock на кадре.
-        2. Переводит DTO -> Instance (градусы -> радианы) и пишет .txt через LabelWriter.
-        3. Перерисовывает тумбу с масками через Drawer (thumbs.py).
-        4. Загружает новый .txt и тумбу в S3, обновляет Postgres.
+        2. Конвертирует DTO → Instance и записывает .txt через LabelWriter.
+        3. Перерисовывает превью с масками через Drawer.
+        4. Загружает .txt и превью в S3, обновляет Postgres.
         """
-        # 1. Проверка роли (observer сохранять не может)
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role not in ("owner", "labeler"):
             raise PermissionError("Недостаточно прав для сохранения разметки")
@@ -94,17 +91,15 @@ class AnnotationService:
         if sample is None:
             raise LookupError("Кадр не найден")
 
-        # 2. Проверка блокировки (lock): редактировать можно только взятый в работу кадр
         now = datetime.now(timezone.utc)
-        if sample.lock_user != user_id or (sample.lock_until and sample.lock_until < now):
+        lock_expired = sample.lock_until and sample.lock_until < now
+        if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
-
-        # 3. Конвертируем DTO -> Instance (внутри валидируются координаты и углы)
         instances = dtos_to_instances(dtos=items, task=task, class_names=class_names)
 
-        # 4. Записываем .txt через LabelWriter во временный файл и читаем байты
+        # Сериализуем инстансы в .txt и читаем байты
         with scratch_file(suffix=".txt") as tmp_txt:
             write_label_file(
                 path=tmp_txt,
@@ -115,7 +110,7 @@ class AnnotationService:
             )
             new_txt_bytes = tmp_txt.read_bytes()
 
-        # 5. Скачиваем оригинал картинки из S3 и перерисовываем тумбу с масками (Drawer)
+        # Скачиваем оригинал из S3 и перерисовываем превью
         s3_img_key = getattr(sample, "image_key", None) or image_key(
             dataset_id, sample.split, f"{sample.stem}.jpg"
         )
@@ -131,18 +126,17 @@ class AnnotationService:
                 task=task,
             )
 
-        # 6. Заливаем обновлённый .txt и новую тумбу в S3
+        # Загружаем обновлённый .txt и превью в S3
         s3_lbl_key = getattr(sample, "label_key", None) or label_key(
             dataset_id, sample.split, sample.stem
         )
         s3_thb_key = getattr(sample, "thumb_key", None) or thumb_key(
             dataset_id, sample.split, sample.stem
         )
-
         self.s3.put_bytes(s3_lbl_key, new_txt_bytes, content_type="text/plain")
         self.s3.put_bytes(s3_thb_key, new_thumb_bytes, content_type="image/jpeg")
 
-        # 7. Сохраняем метаданные объектов в БД (class_id, автор, последний редактор; без координат!)
+        # Обновляем метаданные аннотаций в БД
         if self.annotations is not None:
             self.annotations.replace_sample_annotations(
                 sample_id=sample_id,
@@ -150,7 +144,6 @@ class AnnotationService:
                 user_id=user_id,
             )
 
-        # Сбрасываем возможную прошлую ошибку парсинга и помечаем сэмпл размеченным
         self.samples.mark_updated(
             sample_id=sample_id,
             is_labeled=bool(instances),

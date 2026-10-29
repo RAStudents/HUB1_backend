@@ -1,12 +1,16 @@
+# core/application/export_service.py
 import zipfile
 from pathlib import Path
 from typing import Any
-import yaml
 
+import yaml
 from acmenra_cv import TaskType
 from acmenra_ds import DatasetLayout
+
 from core.infrastructure.media.scratch import scratch_dir
 from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
+
+_SPLITS = ("train", "val", "test")
 
 
 class ExportService:
@@ -32,23 +36,21 @@ class ExportService:
         layout: DatasetLayout = DatasetLayout.DIRECT,
     ) -> dict:
         """
-        Собирает архив датасета ТОЛЬКО из сэмплов со статусом 'accepted'
-        в единой раскладке (по умолчанию DIRECT: train/images, train/labels),
-        загружает zip в S3 и возвращает статус и ссылку на скачивание.
+        Собирает архив датасета только из сэмплов со статусом 'accepted',
+        загружает ZIP в S3 и возвращает статус и ссылку на скачивание.
+
+        Раскладка по умолчанию — DIRECT (train/images, train/labels).
         """
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role is None:
             raise PermissionError("Доступ к датасету запрещён")
 
-        # 1. Создаём запись об экспорте в БД (статус processing)
         export_record = self.exports.create_export(dataset_id=dataset_id, user_id=user_id)
         export_id = export_record.id
 
         try:
-            # 2. Берём ТОЛЬКО accepted сэмплы (согласно контракту)
             accepted_samples = self.samples.list_by_status(
-                dataset_id=dataset_id,
-                status="accepted",
+                dataset_id=dataset_id, status="accepted"
             )
             class_names = self.classes.get_names(dataset_id=dataset_id)
 
@@ -56,13 +58,13 @@ class ExportService:
                 ds_root = tmp_dir / "dataset"
                 ds_root.mkdir(parents=True, exist_ok=True)
 
-                # Всегда создаём папки для всех трёх сплитов в одной выбранной раскладке
-                for split_name in ("train", "val", "test"):
+                # Создаём папки для всех сплитов в выбранной раскладке
+                for split_name in _SPLITS:
                     img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
                     img_dir.mkdir(parents=True, exist_ok=True)
                     lbl_dir.mkdir(parents=True, exist_ok=True)
 
-                # 3. Раскладываем принятые кадры и их .txt по сплитам
+                # Раскладываем принятые кадры и их .txt по сплитам
                 for sample in accepted_samples:
                     split_name = (sample.split or "train").lower()
                     img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
@@ -81,38 +83,32 @@ class ExportService:
                     img_ext = Path(s3_img_key).suffix or ".jpg"
                     (img_dir / f"{sample.stem}{img_ext}").write_bytes(img_bytes)
 
-                    # Если .txt пустой или отсутствует — создаём пустой .txt (DATA_CONTRACT.md)
+                    # Если .txt отсутствует — создаём пустой (согласно DATA_CONTRACT.md)
                     lbl_bytes = self.s3.get_bytes(s3_lbl_key) or b""
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
 
-                # 4. Формируем data.yaml
+                # Формируем data.yaml
                 yaml_data = self._build_yaml_dict(
-                    class_names=class_names,
-                    task=task,
-                    layout=layout,
+                    class_names=class_names, task=task, layout=layout
                 )
                 (ds_root / "data.yaml").write_text(
                     yaml.safe_dump(yaml_data, allow_unicode=True, sort_keys=False),
                     encoding="utf-8",
                 )
 
-                # 5. Пакуем в ZIP-архив
+                # Упаковываем в ZIP
                 zip_path = tmp_dir / f"dataset_{dataset_id}_export_{export_id}.zip"
                 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                     for file_path in ds_root.rglob("*"):
                         if file_path.is_file():
-                            arcname = file_path.relative_to(ds_root)
-                            zf.write(file_path, arcname=str(arcname))
+                            zf.write(file_path, arcname=str(file_path.relative_to(ds_root)))
 
-                # 6. Загружаем готовый ZIP в S3
+                # Загружаем ZIP в S3
                 s3_zip = export_zip_key(dataset_id=dataset_id, export_id=export_id)
                 self.s3.put_bytes(
-                    s3_zip,
-                    zip_path.read_bytes(),
-                    content_type="application/zip",
+                    s3_zip, zip_path.read_bytes(), content_type="application/zip"
                 )
 
-            # 7. Помечаем экспорт готовым и генерируем presigned URL
             self.exports.mark_completed(export_id=export_id, s3_key=s3_zip)
             download_url = self.s3.get_presigned_url(s3_zip)
 
@@ -131,9 +127,8 @@ class ExportService:
     def _resolve_split_dirs(
         root: Path, split_name: str, layout: DatasetLayout
     ) -> tuple[Path, Path]:
-        """Возвращает пути (images_dir, labels_dir) для выбранной раскладки."""
+        """Возвращает (images_dir, labels_dir) для выбранной раскладки датасета."""
         if layout == DatasetLayout.REVERSE:
-            # images/train, labels/train
             return root / "images" / split_name, root / "labels" / split_name
         # DIRECT (по умолчанию): train/images, train/labels
         return root / split_name / "images", root / split_name / "labels"
@@ -144,7 +139,7 @@ class ExportService:
         task: TaskType,
         layout: DatasetLayout,
     ) -> dict:
-        """Генерирует словарь для data.yaml."""
+        """Генерирует словарь для data.yaml в нужной раскладке."""
         if layout == DatasetLayout.REVERSE:
             paths = {
                 "train": "images/train",
@@ -157,7 +152,6 @@ class ExportService:
                 "val": "val/images",
                 "test": "test/images",
             }
-
         return {
             **paths,
             "nc": len(class_names),

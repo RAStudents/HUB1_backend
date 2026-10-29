@@ -1,3 +1,4 @@
+﻿# core/domain/membership.py
 from core.domain.enums import RoleEnum
 
 

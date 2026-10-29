@@ -1,3 +1,4 @@
+﻿# core/domain/sample.py
 from datetime import datetime
 from core.domain.enums import SplitEnum, SampleStatusEnum
 

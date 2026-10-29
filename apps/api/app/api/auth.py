@@ -1,7 +1,10 @@
+# apps/api/app/api/auth.py
 import os
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from apps.api.app.deps import get_auth_service, CurrentUser, get_current_user
+
+from apps.api.app.deps import CurrentUser, get_auth_service, get_current_user
 from core.application.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -13,11 +16,15 @@ YANDEX_REDIRECT_URI = os.getenv(
 ).strip()
 
 
-def _check_yandex_configured():
+def _require_yandex_configured() -> None:
+    """Проверяет, что Яндекс OAuth настроен; иначе возвращает 503."""
     if not YANDEX_CLIENT_ID or not YANDEX_CLIENT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Вход через Яндекс временно недоступен (не заданы ключи YANDEX_CLIENT_ID и YANDEX_CLIENT_SECRET). Используйте вход по почте и паролю.",
+            detail=(
+                "Вход через Яндекс временно недоступен (не заданы YANDEX_CLIENT_ID и "
+                "YANDEX_CLIENT_SECRET). Используйте вход по email и паролю."
+            ),
         )
 
 
@@ -29,8 +36,8 @@ def register(payload: dict, service: AuthService = Depends(get_auth_service)):
             password=payload.get("password", ""),
             name=payload.get("name", "User"),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/login", summary="Вход по email и паролю")
@@ -40,19 +47,19 @@ def login(payload: dict, service: AuthService = Depends(get_auth_service)):
             email=payload.get("email", ""),
             password=payload.get("password", ""),
         )
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
 
 
-@router.get("/me", summary="Профиль текущего пользователя (отображаемое имя, email)")
+@router.get("/me", summary="Профиль текущего пользователя")
 def get_me(
     user: CurrentUser = Depends(get_current_user),
     service: AuthService = Depends(get_auth_service),
 ):
     try:
         return service.get_profile(user_id=user.id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
 @router.patch("/me", summary="Изменить отображаемое имя в профиле")
@@ -62,12 +69,9 @@ def update_me(
     service: AuthService = Depends(get_auth_service),
 ):
     try:
-        return service.update_profile(
-            user_id=user.id,
-            name=payload.get("name", ""),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return service.update_profile(user_id=user.id, name=payload.get("name", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/logout", summary="Выход из аккаунта")
@@ -76,9 +80,9 @@ def logout(response: Response):
     return {"status": "ok", "message": "Вы вышли из аккаунта"}
 
 
-@router.get("/yandex/login", summary="Получить ссылку на вход через Яндекс")
+@router.get("/yandex/login", summary="Получить ссылку для входа через Яндекс")
 def yandex_login():
-    _check_yandex_configured()
+    _require_yandex_configured()
     auth_url = (
         f"https://oauth.yandex.ru/authorize?response_type=code"
         f"&client_id={YANDEX_CLIENT_ID}"
@@ -92,7 +96,7 @@ async def yandex_callback(
     code: str,
     service: AuthService = Depends(get_auth_service),
 ):
-    _check_yandex_configured()
+    _require_yandex_configured()
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
@@ -125,6 +129,10 @@ async def yandex_callback(
 
     yandex_id = str(info.get("id"))
     email = info.get("default_email") or f"{info.get('login')}@yandex.ru"
-    name = info.get("real_name") or info.get("display_name") or info.get("login") or "Yandex User"
-
+    name = (
+        info.get("real_name")
+        or info.get("display_name")
+        or info.get("login")
+        or "Yandex User"
+    )
     return service.login_with_yandex(yandex_id=yandex_id, email=email, name=name)

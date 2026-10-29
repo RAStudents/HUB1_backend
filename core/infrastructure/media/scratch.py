@@ -1,3 +1,5 @@
+# core/infrastructure/media/scratch.py
+import os
 import shutil
 import tempfile
 import zipfile
@@ -9,8 +11,8 @@ from typing import Iterator
 @contextmanager
 def scratch_dir(prefix: str = "hub_") -> Iterator[Path]:
     """
-    Создаёт временную директорию (например, для распаковки zip или сборки экспорта)
-    и гарантированно удаляет её вместе со всем содержимым после выхода из with.
+    Создаёт временную директорию и гарантированно удаляет её при выходе из блока with.
+    Используется для распаковки zip-архивов и сборки экспортов.
     """
     tmp_path = Path(tempfile.mkdtemp(prefix=prefix))
     try:
@@ -22,13 +24,13 @@ def scratch_dir(prefix: str = "hub_") -> Iterator[Path]:
 @contextmanager
 def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
     """
-    Создаёт временный файл (например, чтобы скормить байты из S3 в LabelParser или ImageParser)
-    и удаляет его сразу после завершения работы.
-    """
-    import os
+    Создаёт временный файл и удаляет его при выходе из блока with.
+    Если передан data — записывает байты сразу после создания файла.
 
+    Note: Файловый дескриптор закрывается немедленно (важно для Windows).
+    """
     fd, raw_path = tempfile.mkstemp(suffix=suffix)
-    os.close(fd)  # Важно для Windows: сразу освобождаем дескриптор ОС!
+    os.close(fd)  # Сразу освобождаем дескриптор ОС (обязательно на Windows)
     path = Path(raw_path)
     try:
         if data is not None:
@@ -40,9 +42,10 @@ def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
 
 def extract_zip_safely(zip_bytes_or_path: bytes | Path, dest_dir: Path) -> Path:
     """
-    Распаковывает архив во временную папку. Защищает от Zip Slip (выхода за пределы папки).
-    Если внутри архива лежит одна корневая папка (частый случай при архивации датасета),
-    возвращает путь прямо к ней.
+    Распаковывает ZIP-архив в dest_dir с защитой от Zip Slip-атаки.
+
+    Если архив содержит одну корневую папку (типичный случай при архивации датасета),
+    возвращает путь прямо к ней; иначе — путь к директории с распакованным содержимым.
     """
     if isinstance(zip_bytes_or_path, bytes):
         zip_file_path = dest_dir / "_upload.zip"
@@ -55,12 +58,15 @@ def extract_zip_safely(zip_bytes_or_path: bytes | Path, dest_dir: Path) -> Path:
 
     with zipfile.ZipFile(zip_file_path, "r") as zf:
         for member in zf.infolist():
-            # Игнорируем системный мусор macOS
+            # Пропускаем системный мусор macOS
             if "__MACOSX" in member.filename or Path(member.filename).name.startswith("._"):
                 continue
+
+            # Защита от Zip Slip: целевой путь должен оставаться внутри extract_root
             target_path = (extract_root / member.filename).resolve()
             if not str(target_path).startswith(str(extract_root.resolve())):
                 raise ValueError(f"Небезопасный путь в архиве: {member.filename}")
+
             zf.extract(member, extract_root)
 
     if isinstance(zip_bytes_or_path, bytes):
