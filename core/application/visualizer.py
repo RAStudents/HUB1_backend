@@ -13,19 +13,33 @@ from acmenra_ds import Config, Dataset
 from core.application.import_service import detect_layout
 from core.infrastructure.cv.labels import build_category_enum
 from core.infrastructure.cv.thumbs import DEFAULT_PALETTE
+from core.infrastructure.media.scratch import scratch_file
 
 STORAGE_DIR = Path("storage")
+
+
+def read_text_safe(path: Path) -> str:
+    """Читает текстовый файл (yaml/txt), поддерживая UTF-8, UTF-8-SIG и Windows-1251."""
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def read_image_unicode(path: Path) -> np.ndarray | None:
     """Надёжное чтение изображения с поддержкой Unicode/кириллицы в пути (Windows)."""
     try:
-        if not path.exists():
+        path_obj = Path(path)
+        if not path_obj.is_file():
             return None
-        stream = np.fromfile(str(path), dtype=np.uint8)
-        if stream.size == 0:
+        raw_bytes = path_obj.read_bytes()
+        if not raw_bytes:
             return None
-        return cv2.imdecode(stream, cv2.IMREAD_COLOR)
+        buf = np.frombuffer(raw_bytes, dtype=np.uint8)
+        return cv2.imdecode(buf, cv2.IMREAD_COLOR)
     except Exception:
         return None
 
@@ -33,20 +47,38 @@ def read_image_unicode(path: Path) -> np.ndarray | None:
 def write_image_unicode(path: Path, img: np.ndarray) -> bool:
     """Надёжное сохранение изображения с поддержкой Unicode в пути (Windows)."""
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        ext = path.suffix or ".png"
+        path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+        ext = path_obj.suffix.lower() or ".png"
         success, encoded = cv2.imencode(ext, img)
         if success:
-            encoded.tofile(str(path))
-        return success
+            path_obj.write_bytes(encoded.tobytes())
+        return bool(success)
     except Exception:
         return False
+
+
+def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
+    """
+    Безопасно парсит .txt разметку через acmenra-ds, даже если путь
+    содержит кириллицу или пробелы (через временный ASCII-файл).
+    """
+    if not label_path or not label_path.is_file():
+        return []
+
+    path_str = str(label_path)
+    if path_str.isascii():
+        return ds.label_parser.parse(path=label_path, is_strict=False) or []
+
+    text_content = read_text_safe(label_path)
+    with scratch_file(suffix=".txt", data=text_content.encode("utf-8")) as tmp_txt:
+        return ds.label_parser.parse(path=tmp_txt, is_strict=False) or []
 
 
 def resolve_yaml_path(path_input: str | Path) -> Path:
     """Находит yaml-конфиг датасета, даже если передан путь к папке."""
     p = Path(path_input)
-    if p.is_file() and p.suffix in (".yaml", ".yml"):
+    if p.is_file() and p.suffix.lower() in (".yaml", ".yml"):
         return p
 
     if p.is_dir():
@@ -64,7 +96,7 @@ def resolve_yaml_path(path_input: str | Path) -> Path:
 def load_acmenra_dataset(yaml_path: Path, default_task: TaskType = TaskType.SEGMENT) -> Dataset:
     """Инициализирует Dataset из acmenra-ds по yaml-конфигу."""
     yaml_path = resolve_yaml_path(yaml_path)
-    raw_cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    raw_cfg = yaml.safe_load(read_text_safe(yaml_path)) or {}
 
     root = yaml_path.parent
     cfg_path = raw_cfg.get("path")
@@ -77,7 +109,7 @@ def load_acmenra_dataset(yaml_path: Path, default_task: TaskType = TaskType.SEGM
 
     yaml_names = raw_cfg.get("names", [])
     names = (
-        [yaml_names[k] for k in sorted(yaml_names.keys())]
+        [str(yaml_names[k]) for k in sorted(yaml_names.keys())]
         if isinstance(yaml_names, dict)
         else [str(x) for x in yaml_names]
     )
@@ -225,7 +257,7 @@ def build_dataset_gallery(
         instances = []
         if label_path and label_path.exists():
             try:
-                instances = ds.label_parser.parse(path=label_path, is_strict=False) or []
+                instances = parse_label_unicode(ds, label_path)
             except Exception as exc:
                 print(f"[WARNING] Ошибка парсинга {label_path.name}: {exc}")
 

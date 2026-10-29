@@ -33,18 +33,16 @@ DEFAULT_PALETTE: List[tuple] = [
 
 
 def read_image_unicode(image_path: Path) -> np.ndarray | None:
-    """
-    Надёжное чтение изображения с поддержкой Unicode/кириллицы в пути (Windows).
-    Возвращает None если файл не существует или не может быть декодирован.
-    """
+    """Надёжное чтение изображения с поддержкой Unicode/кириллицы в пути (Windows)."""
     try:
         path_obj = Path(image_path)
-        if not path_obj.exists():
+        if not path_obj.is_file():
             return None
-        stream = np.fromfile(str(path_obj), dtype=np.uint8)
-        if stream.size == 0:
+        raw_bytes = path_obj.read_bytes()
+        if not raw_bytes:
             return None
-        return cv2.imdecode(stream, cv2.IMREAD_COLOR)
+        buf = np.frombuffer(raw_bytes, dtype=np.uint8)
+        return cv2.imdecode(buf, cv2.IMREAD_COLOR)
     except Exception:
         return None
 
