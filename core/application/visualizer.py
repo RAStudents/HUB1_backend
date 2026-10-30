@@ -3,23 +3,20 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import quote
-
 import cv2
 import numpy as np
 import yaml
 from acmenra_cv import TaskType
-from acmenra_ds import Config, Dataset
+from acmenra_ds import Config, Dataset, DatasetLayout
 
-from core.application.import_service import detect_layout
 from core.infrastructure.cv.labels import build_category_enum
-from core.infrastructure.cv.thumbs import DEFAULT_PALETTE
-from core.infrastructure.media.scratch import scratch_file
+from core.infrastructure.cv.thumbs import render_thumbnail_array
 
 STORAGE_DIR = Path("storage")
+_YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
 
 
 def read_text_safe(path: Path) -> str:
-    """Читает текстовый файл (yaml/txt), поддерживая UTF-8, UTF-8-SIG и Windows-1251."""
     raw = path.read_bytes()
     for enc in ("utf-8-sig", "utf-8", "cp1251"):
         try:
@@ -30,7 +27,6 @@ def read_text_safe(path: Path) -> str:
 
 
 def read_image_unicode(path: Path) -> np.ndarray | None:
-    """Надёжное чтение изображения с поддержкой Unicode/кириллицы в пути (Windows)."""
     try:
         path_obj = Path(path)
         if not path_obj.is_file():
@@ -45,7 +41,6 @@ def read_image_unicode(path: Path) -> np.ndarray | None:
 
 
 def write_image_unicode(path: Path, img: np.ndarray) -> bool:
-    """Надёжное сохранение изображения с поддержкой Unicode в пути (Windows)."""
     try:
         path_obj = Path(path)
         path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -58,31 +53,28 @@ def write_image_unicode(path: Path, img: np.ndarray) -> bool:
         return False
 
 
-def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
-    """
-    Безопасно парсит .txt разметку через acmenra-ds, даже если путь
-    содержит кириллицу или пробелы (через временный ASCII-файл).
-    """
-    if not label_path or not label_path.is_file():
-        return []
+def resolve_dataset_root(root: Path) -> Path:
+    for y_name in _YAML_NAMES:
+        found = list(root.rglob(y_name))
+        if found:
+            return found[0].parent
 
-    path_str = str(label_path)
-    if path_str.isascii():
-        return ds.label_parser.parse(path=label_path, is_strict=False) or []
+    for split_dir in ("train", "valid", "val", "images"):
+        found_splits = [p for p in root.rglob(split_dir) if p.is_dir()]
+        if found_splits:
+            parent = found_splits[0].parent
+            return parent.parent if parent.name in ("images", "labels") else parent
 
-    text_content = read_text_safe(label_path)
-    with scratch_file(suffix=".txt", data=text_content.encode("utf-8")) as tmp_txt:
-        return ds.label_parser.parse(path=tmp_txt, is_strict=False) or []
+    return root
 
 
 def resolve_yaml_path(path_input: str | Path) -> Path:
-    """Находит yaml-конфиг датасета, даже если передан путь к папке."""
     p = Path(path_input)
     if p.is_file() and p.suffix.lower() in (".yaml", ".yml"):
         return p
 
     if p.is_dir():
-        for name in ("data.yaml", "data.yml", "dataset.yaml", "dataset.yml"):
+        for name in _YAML_NAMES:
             candidate = p / name
             if candidate.exists():
                 return candidate
@@ -93,117 +85,118 @@ def resolve_yaml_path(path_input: str | Path) -> Path:
     raise ValueError(f"Файл конфигурации датасета не найден по пути: {path_input}")
 
 
-def load_acmenra_dataset(yaml_path: Path, default_task: TaskType = TaskType.SEGMENT) -> Dataset:
-    """Инициализирует Dataset из acmenra-ds по yaml-конфигу."""
-    yaml_path = resolve_yaml_path(yaml_path)
+def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
+    """Строгий нативный парсинг разметки без хаков и автоматических подгонок."""
+    if not label_path or not label_path.is_file():
+        return []
+
+    try:
+        return ds.label_parser.parse(path=label_path, is_strict=False) or []
+    except Exception as e:
+        print(f"[WARNING] Ошибка парсинга {label_path.name}: {e}")
+
+    return []
+
+
+def load_acmenra_dataset(yaml_or_dir_path: Path) -> Dataset:
+    path_obj = Path(yaml_or_dir_path)
+    if path_obj.is_dir():
+        yaml_path = resolve_yaml_path(path_obj)
+    else:
+        yaml_path = path_obj
+
+    root = resolve_dataset_root(yaml_path.parent)
+
     raw_cfg = yaml.safe_load(read_text_safe(yaml_path)) or {}
+    raw_names = raw_cfg.get("names") or raw_cfg.get("classes") or []
+    names = []
+    
+    if isinstance(raw_names, dict):
+        names = [str(raw_names[k]) for k in sorted(raw_names.keys())]
+    elif isinstance(raw_names, list):
+        names = [str(x) for x in raw_names]
+    elif isinstance(raw_names, str):
+        names = [x.strip() for x in raw_names.split(",")]
 
-    root = yaml_path.parent
-    cfg_path = raw_cfg.get("path")
-    if cfg_path:
-        candidate_root = Path(cfg_path)
-        if not candidate_root.is_absolute():
-            candidate_root = (yaml_path.parent / candidate_root).resolve()
-        if candidate_root.exists():
-            root = candidate_root
-
-    yaml_names = raw_cfg.get("names", [])
-    names = (
-        [str(yaml_names[k]) for k in sorted(yaml_names.keys())]
-        if isinstance(yaml_names, dict)
-        else [str(x) for x in yaml_names]
-    )
+    if not names:
+        names = ["object"]
 
     category_enum = build_category_enum(names)
-
+    
+    # Строгое чтение task из конфига, без дефолтов и попыток угадывания
     task_str = raw_cfg.get("task")
+    if not task_str:
+        raise ValueError(f"В конфигурационном файле '{yaml_path.name}' обязательно должен быть явно указан параметр 'task'.")
+    
     try:
-        task = TaskType(task_str) if task_str else default_task
+        task = TaskType(task_str)
     except ValueError:
-        task = default_task
+        raise ValueError(f"Неизвестный тип задачи '{task_str}' в файле '{yaml_path.name}'.")
 
-    layout = detect_layout(root)
-    val_leaf = "valid" if (root / "valid").exists() or (root / "images" / "valid").exists() else "val"
-    val_exists = (root / val_leaf).exists() or (root / "images" / val_leaf).exists()
-    test_exists = (root / "test").exists() or (root / "images" / "test").exists()
+    layout = DatasetLayout.REVERSE if (root / "images" / "train").exists() or (root / "images").exists() else DatasetLayout.DIRECT
+    
+    train_path = raw_cfg.get("train", "train")
+    if isinstance(train_path, str):
+        train_path = train_path.strip().lstrip("./")
+        if train_path.startswith("images/"):
+            train_path = train_path.replace("images/", "", 1)
+
+    val_candidate = "valid" if (root / "valid").exists() else "val"
+    has_val = (root / val_candidate).exists() or (root / "images" / val_candidate).exists()
+    has_test = (root / "test").exists() or (root / "images" / "test").exists()
 
     config = Config(
         root=root,
-        train="train",
-        val=val_leaf if val_exists else None,
-        test="test" if test_exists else None,
+        train=train_path if (root / train_path).exists() or (root / "images" / train_path).exists() else "train",
+        val=val_candidate if has_val else None,
+        test="test" if has_test else None,
         names=names,
         task=task,
         layout=layout,
-        train_leaf="train",
-        val_leaf=val_leaf,
-        test_leaf="test",
     )
+
     return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
 
 
-def render_rgba_mask_from_instances(
-    shape: tuple[int, int],
-    instances: list,
-    task: TaskType,
-) -> np.ndarray:
-    """Рисует прозрачную RGBA-маску поверх изображения по инстансам из acmenra-cv."""
-    h, w = shape[:2]
-    bgra = np.zeros((h, w, 4), dtype=np.uint8)
+def _find_samples_fallback(root: Path, split_name: str) -> list[tuple[Path, Path | None]]:
+    img_candidates = [
+        root / split_name / "images",
+        root / "images" / split_name,
+        root / split_name,
+    ]
+    images_dir = None
+    for cand in img_candidates:
+        if cand.is_dir():
+            images_dir = cand
+            break
 
-    if not instances:
-        return bgra
+    if not images_dir:
+        return []
 
-    for inst in instances:
-        class_id = getattr(inst, "class_id", 0) or 0
-        color_bgr = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    img_files = [p for p in images_dir.iterdir() if p.is_file() and p.suffix.lower() in exts]
+    img_files.sort()
 
-        if task == TaskType.SEGMENT and getattr(inst, "polygon", None) is not None:
-            pts = np.array(
-                [[int(p.X * w), int(p.Y * h)] for p in inst.polygon.points],
-                dtype=np.int32,
-            )
-            if len(pts) >= 3:
-                overlay = bgra.copy()
-                cv2.fillPoly(overlay, [pts], color=(*color_bgr, 90))
-                cv2.addWeighted(overlay, 0.5, bgra, 0.5, 0, bgra)
-                cv2.polylines(bgra, [pts], isClosed=True, color=(*color_bgr, 255), thickness=2)
+    lbl_candidates = [
+        root / split_name / "labels",
+        root / "labels" / split_name,
+    ]
+    labels_dir = None
+    for cand in lbl_candidates:
+        if cand.is_dir():
+            labels_dir = cand
+            break
 
-        elif task == TaskType.DETECT and getattr(inst, "box", None) is not None:
-            x1, y1, x2, y2 = inst.box.to_xyxyn()
-            pt1 = (int(x1 * w), int(y1 * h))
-            pt2 = (int(x2 * w), int(y2 * h))
-            overlay = bgra.copy()
-            cv2.rectangle(overlay, pt1, pt2, color=(*color_bgr, 90), thickness=-1)
-            cv2.addWeighted(overlay, 0.5, bgra, 0.5, 0, bgra)
-            cv2.rectangle(bgra, pt1, pt2, color=(*color_bgr, 255), thickness=2)
+    result = []
+    for img_p in img_files:
+        lbl_p = None
+        if labels_dir:
+            cand_lbl = labels_dir / f"{img_p.stem}.txt"
+            if cand_lbl.exists():
+                lbl_p = cand_lbl
+        result.append((img_p, lbl_p))
 
-    return bgra
-
-
-def _resolve_split(ds: Dataset, split_name: str) -> tuple[Any, str]:
-    """
-    Возвращает (split_object, actual_split_name).
-    Пробует 'val'/'valid' как синонимы; если ничего нет — берёт первый доступный сплит.
-    """
-    split = ds.split(split_name)
-    if split and len(split) > 0:
-        return split, split_name
-
-    # Синонимы val / valid
-    if split_name in ("val", "valid"):
-        alt = "valid" if split_name == "val" else "val"
-        split = ds.split(alt)
-        if split and len(split) > 0:
-            return split, alt
-
-    # Первый доступный сплит
-    for candidate in ("train", "val", "test"):
-        split = ds.split(candidate)
-        if split and len(split) > 0:
-            return split, candidate
-
-    return None, split_name
+    return result
 
 
 def build_dataset_gallery(
@@ -213,18 +206,29 @@ def build_dataset_gallery(
     limit: int = 50,
     base_url: str = "http://127.0.0.1:8000",
 ) -> List[Dict[str, Any]]:
-    """
-    Строит галерею превью датасета с оверлеями масок.
-    Изображения и маски кешируются в storage/ для раздачи через StaticFiles.
-    """
     resolved_yaml = resolve_yaml_path(yaml_path)
-    ds = load_acmenra_dataset(resolved_yaml, default_task=TaskType.SEGMENT)
-    target_split, actual_split = _resolve_split(ds, split_name)
+    root = resolve_dataset_root(resolved_yaml.parent)
 
-    if target_split is None:
+    ds = load_acmenra_dataset(resolved_yaml)
+    class_names = ds.names or []
+
+    samples_to_process = []
+    try:
+        split_obj = ds.split(split_name)
+        if split_obj and len(split_obj) > 0:
+            for s in split_obj.samples:
+                l_path = Path(s.label_path) if getattr(s, "label_path", None) else None
+                samples_to_process.append((Path(s.image_path), l_path))
+    except Exception:
+        pass
+
+    if not samples_to_process:
+        samples_to_process = _find_samples_fallback(root, split_name)
+
+    if not samples_to_process:
         return []
 
-    base_dir = STORAGE_DIR / f"dataset_{dataset_id}" / actual_split
+    base_dir = STORAGE_DIR / f"dataset_{dataset_id}" / split_name
     img_out_dir = base_dir / "images"
     mask_out_dir = base_dir / "masks"
     img_out_dir.mkdir(parents=True, exist_ok=True)
@@ -233,14 +237,11 @@ def build_dataset_gallery(
     base_url = base_url.rstrip("/")
     gallery_items = []
 
-    for idx, sample in enumerate(target_split):
+    for idx, (img_path, label_path) in enumerate(samples_to_process):
         if idx >= limit:
             break
 
-        img_path = Path(sample.image_path)
-        label_path = Path(sample.label_path) if sample.label_path else None
         stem = img_path.stem
-
         dest_img_path = img_out_dir / img_path.name
         dest_mask_path = mask_out_dir / f"{stem}_mask.png"
 
@@ -256,32 +257,32 @@ def build_dataset_gallery(
 
         instances = []
         if label_path and label_path.exists():
-            try:
-                instances = parse_label_unicode(ds, label_path)
-            except Exception as exc:
-                print(f"[WARNING] Ошибка парсинга {label_path.name}: {exc}")
+            instances = parse_label_unicode(ds, label_path)
 
-        if not dest_img_path.exists():
-            try:
-                shutil.copy2(img_path, dest_img_path)
-            except Exception:
-                write_image_unicode(dest_img_path, img_array)
+        try:
+            shutil.copy2(img_path, dest_img_path)
+        except Exception:
+            write_image_unicode(dest_img_path, img_array)
 
-        mask_bgra = render_rgba_mask_from_instances(
-            shape=img_array.shape, instances=instances, task=ds.task
+        masked_array = render_thumbnail_array(
+            frame=img_array,
+            instances=instances,
+            task=ds.task,
         )
-        write_image_unicode(dest_mask_path, mask_bgra)
+        write_image_unicode(dest_mask_path, masked_array)
+
+        cache_bust = int(dest_mask_path.stat().st_mtime) if dest_mask_path.exists() else 1
 
         gallery_items.append({
             "id": idx + 1,
             "filename": img_path.name,
             "image_url": (
                 f"{base_url}/storage/dataset_{dataset_id}"
-                f"/{actual_split}/images/{quote(img_path.name)}"
+                f"/{split_name}/images/{quote(img_path.name)}?v={cache_bust}"
             ),
             "mask_url": (
                 f"{base_url}/storage/dataset_{dataset_id}"
-                f"/{actual_split}/masks/{quote(f'{stem}_mask.png')}"
+                f"/{split_name}/masks/{quote(f'{stem}_mask.png')}?v={cache_bust}"
             ),
             "objects_count": len(instances),
             "task": str(ds.task),

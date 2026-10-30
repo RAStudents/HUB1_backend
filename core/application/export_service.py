@@ -38,8 +38,6 @@ class ExportService:
         """
         Собирает архив датасета только из сэмплов со статусом 'accepted',
         загружает ZIP в S3 и возвращает статус и ссылку на скачивание.
-
-        Раскладка по умолчанию — DIRECT (train/images, train/labels).
         """
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role is None:
@@ -58,13 +56,11 @@ class ExportService:
                 ds_root = tmp_dir / "dataset"
                 ds_root.mkdir(parents=True, exist_ok=True)
 
-                # Создаём папки для всех сплитов в выбранной раскладке
                 for split_name in _SPLITS:
                     img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
                     img_dir.mkdir(parents=True, exist_ok=True)
                     lbl_dir.mkdir(parents=True, exist_ok=True)
 
-                # Раскладываем принятые кадры и их .txt по сплитам
                 for sample in accepted_samples:
                     split_name = (sample.split or "train").lower()
                     img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
@@ -83,11 +79,10 @@ class ExportService:
                     img_ext = Path(s3_img_key).suffix or ".jpg"
                     (img_dir / f"{sample.stem}{img_ext}").write_bytes(img_bytes)
 
-                    # Если .txt отсутствует — создаём пустой (согласно DATA_CONTRACT.md)
                     lbl_bytes = self.s3.get_bytes(s3_lbl_key) or b""
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
 
-                # Формируем data.yaml
+                # Генерация конфига data.yaml для экспорта
                 yaml_data = self._build_yaml_dict(
                     class_names=class_names, task=task, layout=layout
                 )
@@ -96,14 +91,12 @@ class ExportService:
                     encoding="utf-8",
                 )
 
-                # Упаковываем в ZIP
                 zip_path = tmp_dir / f"dataset_{dataset_id}_export_{export_id}.zip"
                 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                     for file_path in ds_root.rglob("*"):
                         if file_path.is_file():
                             zf.write(file_path, arcname=str(file_path.relative_to(ds_root)))
 
-                # Загружаем ZIP в S3
                 s3_zip = export_zip_key(dataset_id=dataset_id, export_id=export_id)
                 self.s3.put_bytes(
                     s3_zip, zip_path.read_bytes(), content_type="application/zip"
@@ -127,10 +120,8 @@ class ExportService:
     def _resolve_split_dirs(
         root: Path, split_name: str, layout: DatasetLayout
     ) -> tuple[Path, Path]:
-        """Возвращает (images_dir, labels_dir) для выбранной раскладки датасета."""
         if layout == DatasetLayout.REVERSE:
             return root / "images" / split_name, root / "labels" / split_name
-        # DIRECT (по умолчанию): train/images, train/labels
         return root / split_name / "images", root / split_name / "labels"
 
     @staticmethod
@@ -139,19 +130,19 @@ class ExportService:
         task: TaskType,
         layout: DatasetLayout,
     ) -> dict:
-        """Генерирует словарь для data.yaml в нужной раскладке."""
-        if layout == DatasetLayout.REVERSE:
-            paths = {
+        paths = (
+            {
                 "train": "images/train",
                 "val": "images/val",
                 "test": "images/test",
             }
-        else:
-            paths = {
+            if layout == DatasetLayout.REVERSE
+            else {
                 "train": "train/images",
                 "val": "val/images",
                 "test": "test/images",
             }
+        )
         return {
             **paths,
             "nc": len(class_names),

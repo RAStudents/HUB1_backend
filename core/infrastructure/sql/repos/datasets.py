@@ -14,10 +14,6 @@ class DatasetRepository:
         description: str | None = None,
         is_private: bool = True,
     ) -> int:
-        """
-        Создаёт датасет и автоматически добавляет владельца
-        в таблицу участников с ролью 'owner'.
-        """
         dataset_query = datasets_table.insert().values(
             name=name,
             task=str(task),
@@ -40,3 +36,14 @@ class DatasetRepository:
     def get_by_id(self, dataset_id: int):
         query = datasets_table.select().where(datasets_table.c.id == dataset_id)
         return self.db.execute(query).fetchone()
+
+    def list_by_ids(self, dataset_ids: list[int]) -> list:
+        """Возвращает список датасетов по их ID для каталога."""
+        if not dataset_ids:
+            return []
+        query = (
+            datasets_table.select()
+            .where(datasets_table.c.id.in_(dataset_ids))
+            .order_by(datasets_table.c.id.desc())
+        )
+        return self.db.execute(query).fetchall()

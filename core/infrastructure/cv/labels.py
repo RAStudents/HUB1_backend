@@ -16,8 +16,6 @@ def build_category_enum(class_names: Sequence[str]) -> type[Enum]:
     if not class_names:
         return Enum("DatasetCategory", {"_EMPTY": 0})
 
-    # Ключи Enum не могут дублироваться или быть пустыми —
-    # при коллизии добавляем числовой суффикс
     members: dict[str, int] = {}
     for idx, name in enumerate(class_names):
         safe_key = name.strip() or f"CLASS_{idx}"
@@ -32,19 +30,24 @@ def parse_label_file(
     path: Path,
     class_names: Sequence[str],
     task: TaskType,
-    is_strict: bool = True,
+    is_strict: bool = False,
 ) -> List[Instance]:
     """
-    Читает YOLO .txt файл и возвращает список Instance.
-    Пустой файл или отсутствующий файл корректно возвращает [].
+    Читает YOLO .txt файл напрямую через LabelParser из acmenra-ds.
     """
     if not path.exists() or path.stat().st_size == 0:
         return []
 
     category = build_category_enum(class_names)
     nc = max(len(class_names), 1)
+    
     parser = LabelParser(nc=nc, task_type=task, category=category)
-    return parser.parse(path=path, is_strict=is_strict)
+    
+    try:
+        return parser.parse(path=path, is_strict=is_strict) or []
+    except Exception as e:
+        print(f"[WARNING] Ошибка парсинга разметки в {path.name}: {e}")
+        return []
 
 
 def write_label_file(
@@ -55,8 +58,7 @@ def write_label_file(
     is_strict: bool = True,
 ) -> None:
     """
-    Записывает список Instance в YOLO .txt файл.
-    Если instances пуст — создаёт пустой .txt (согласно DATA_CONTRACT.md).
+    Записывает список Instance в YOLO .txt файл через LabelWriter из acmenra-ds.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -66,5 +68,6 @@ def write_label_file(
 
     category = build_category_enum(class_names)
     nc = max(len(class_names), 1)
+    
     writer = LabelWriter(nc=nc, task_type=task, category=category)
     writer.write(path=path, instances=instances, is_strict=is_strict)

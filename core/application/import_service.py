@@ -14,52 +14,36 @@ from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
 STORAGE_DIR = Path("storage")
-
-_YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml")
-_SPLIT_DIRS = ("train", "val", "valid", "test", "images")
+_YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
 
 
 def resolve_dataset_root(root: Path) -> Path:
-    """
-    Автоматически спускается до реального корня датасета,
-    если архив распаковался с вложенной папкой (например, archive/my_dataset/data.yaml).
-    """
-    # Проверяем, есть ли признаки корня прямо здесь
-    if any((root / name).is_file() for name in _YAML_NAMES):
-        return root
-    if any((root / s).is_dir() for s in _SPLIT_DIRS):
-        return root
-
-    # Ищем yaml или известные сплит-директории глубже по дереву
+    """Находит корень датасета по наличию конфига или структуры сплитов."""
     for yaml_name in _YAML_NAMES:
         found = list(root.rglob(yaml_name))
         if found:
             return found[0].parent
 
-    for split_dir in ("train", "valid", "val"):
+    for split_dir in ("train", "valid", "val", "images"):
         found_splits = [p for p in root.rglob(split_dir) if p.is_dir()]
         if found_splits:
             parent = found_splits[0].parent
-            return parent.parent if parent.name == "images" else parent
+            if parent.name in ("images", "labels"):
+                return parent.parent
+            return parent
 
     return root
 
 
 def detect_layout(root: Path) -> DatasetLayout:
-    """
-    Определяет раскладку датасета:
-    - REVERSE: root/images/train (images на уровне выше сплитов)
-    - DIRECT:  root/train/images (images внутри каждого сплита)
-    """
+    """Определяет раскладку датасета (DIRECT или REVERSE) с помощью acmenra-ds."""
     root = resolve_dataset_root(root)
-    has_reverse = (root / "images").is_dir() and any(
-        (root / "images" / s).is_dir() for s in ("train", "val", "valid", "test")
-    )
-    return DatasetLayout.REVERSE if has_reverse else DatasetLayout.DIRECT
+    if (root / "images" / "train").is_dir() or (root / "images").is_dir():
+        return DatasetLayout.REVERSE
+    return DatasetLayout.DIRECT
 
 
 def find_yaml_file(root: Path) -> Path | None:
-    """Ищет конфигурационный yaml в корне датасета (с учётом вложенности)."""
     root = resolve_dataset_root(root)
     for name in _YAML_NAMES:
         candidate = root / name
@@ -74,45 +58,46 @@ def build_acmenra_dataset(
     task: TaskType,
     fallback_names: List[str] | None = None,
 ) -> Dataset:
-    """
-    Создаёт объект Dataset из acmenra-ds, автоматически определяя раскладку
-    (DIRECT / REVERSE) и подтягивая имена классов из yaml (если он есть).
-
-    is_strict=False позволяет не падать при битом .txt, а записать
-    parse_error в конкретный сэмпл БД.
-    """
     root = resolve_dataset_root(root)
-    layout = detect_layout(root)
     yaml_path = find_yaml_file(root)
 
     names = fallback_names or []
-    val_leaf = "valid" if (root / "valid").exists() or (root / "images" / "valid").exists() else "val"
+    raw_cfg = {}
 
     if yaml_path is not None:
-        raw_cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-        yaml_names = raw_cfg.get("names")
-        if isinstance(yaml_names, dict):
-            names = [yaml_names[k] for k in sorted(yaml_names.keys())]
-        elif isinstance(yaml_names, list):
-            names = [str(x) for x in yaml_names]
+        try:
+            raw_cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            raw_names = raw_cfg.get("names") or raw_cfg.get("classes") or []
+            
+            if isinstance(raw_names, dict):
+                names = [str(raw_names[k]) for k in sorted(raw_names.keys())]
+            elif isinstance(raw_names, list):
+                names = [str(x) for x in raw_names]
+            elif isinstance(raw_names, str):
+                names = [x.strip() for x in raw_names.split(",")]
+        except Exception:
+            pass
+
+    if not names:
+        names = ["object"]
 
     category_enum = build_category_enum(names)
+    layout = detect_layout(root)
 
-    val_exists = (root / val_leaf).exists() or (root / "images" / val_leaf).exists()
-    test_exists = (root / "test").exists() or (root / "images" / "test").exists()
+    task_str = raw_cfg.get("task")
+    try:
+        resolved_task = TaskType(task_str) if task_str else task
+    except ValueError:
+        resolved_task = task
 
+    # Передаем конфигурацию напрямую в acmenra-ds, без ручных симлинков
     config = Config(
         root=root,
-        train="train",
-        val=val_leaf if val_exists else None,
-        test="test" if test_exists else None,
         names=names,
-        task=task,
+        task=resolved_task,
         layout=layout,
-        train_leaf="train",
-        val_leaf=val_leaf,
-        test_leaf="test",
     )
+
     return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
 
 
@@ -129,13 +114,6 @@ class ImportService:
         zip_source: bytes | Path,
         existing_classes: List[str] | None = None,
     ) -> dict:
-        """
-        Полный цикл импорта ZIP-архива датасета:
-        1. Распаковывает zip во временную папку и копирует в локальный storage.
-        2. Инициализирует acmenra_ds.Dataset.
-        3. Проходит по train / val / test.
-        4. Парсит разметку, генерирует превью с масками и загружает в S3 + БД.
-        """
         imported_count = 0
         errors_count = 0
 
@@ -143,29 +121,24 @@ class ImportService:
             raw_root = extract_zip_safely(zip_source, tmp_dir)
             root = resolve_dataset_root(raw_root)
 
-            # Сохраняем датасет в storage для локальной галереи и overlay
             persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
             if persistent_raw_dir.exists():
                 shutil.rmtree(persistent_raw_dir, ignore_errors=True)
             persistent_raw_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(root, persistent_raw_dir, dirs_exist_ok=True)
 
-            ds = build_acmenra_dataset(root=root, task=task, fallback_names=existing_classes)
+            ds = build_acmenra_dataset(root=persistent_raw_dir, task=task, fallback_names=existing_classes)
             class_names = ds.names or existing_classes or []
 
             if class_names and self.classes is not None:
                 self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
 
-            # Если в архиве не было data.yaml — создаём его для визуализатора
-            if find_yaml_file(persistent_raw_dir) is None:
-                fallback_yaml = persistent_raw_dir / "data.yaml"
-                fallback_yaml.write_text(
-                    yaml.safe_dump({"names": class_names, "task": task.value}, allow_unicode=True),
-                    encoding="utf-8",
-                )
-
             for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST):
-                split_obj = ds.split(split_enum)
+                try:
+                    split_obj = ds.split(split_enum)
+                except Exception:
+                    continue
+
                 if split_obj is None:
                     continue
 
@@ -175,7 +148,7 @@ class ImportService:
                     parse_error: str | None = None
                     instances = []
 
-                    if sample.label_path is not None and sample.label_path.exists():
+                    if getattr(sample, "label_path", None) is not None and sample.label_path.exists():
                         try:
                             instances = parse_label_file(
                                 path=sample.label_path,
@@ -189,7 +162,6 @@ class ImportService:
 
                     img_bytes, img_filename, content_type = normalize_image_file(sample.image_path)
 
-                    # Используем ASCII-имя для tmp-файла, чтобы OpenCV не падал на кириллице
                     ext = Path(img_filename).suffix or ".jpg"
                     norm_img_path = tmp_dir / f"_tmp_thumb_{idx}{ext}"
                     norm_img_path.write_bytes(img_bytes)
@@ -209,7 +181,7 @@ class ImportService:
 
                     raw_txt = (
                         sample.label_path.read_bytes()
-                        if (sample.label_path and sample.label_path.exists())
+                        if (getattr(sample, "label_path", None) and sample.label_path.exists())
                         else b""
                     )
                     self.s3.put_bytes(s3_lbl_key, raw_txt, content_type="text/plain")
