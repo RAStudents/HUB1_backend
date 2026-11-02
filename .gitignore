@@ -218,17 +218,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-storage/
-__pycache__/
-*.pyc
-.venv/
-venv/
-.idea/
-.vscode/
-media/
-uploads/
-*.zip
-temp/
-.venv/
-local_s3_storage/
