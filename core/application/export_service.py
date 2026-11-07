@@ -5,13 +5,10 @@ from typing import Any
 
 import yaml
 from acmenra_cv import TaskType
-from acmenra_ds import DatasetLayout
+from acmenra_ds import Config, Dataset, DatasetLayout
 
 from core.infrastructure.media.scratch import scratch_dir
 from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
-
-_SPLITS = ("train", "val", "test")
-
 
 class ExportService:
     def __init__(
@@ -33,11 +30,11 @@ class ExportService:
         dataset_id: int,
         user_id: int,
         task: TaskType,
-        layout: DatasetLayout = DatasetLayout.DIRECT,
     ) -> dict:
         """
         Собирает архив датасета только из сэмплов со статусом 'accepted',
-        загружает ZIP в S3 и возвращает статус и ссылку на скачивание.
+        проверяет его через acmenra-ds, сохраняет в прямой раскладке, загружает ZIP
+        в S3 и возвращает статус и ссылку на скачивание.
         """
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role is None:
@@ -56,14 +53,34 @@ class ExportService:
                 ds_root = tmp_dir / "dataset"
                 ds_root.mkdir(parents=True, exist_ok=True)
 
-                for split_name in _SPLITS:
-                    img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
+                config = Config(
+                    root=ds_root,
+                    train="train/images",
+                    val="val/images",
+                    test="test/images",
+                    names=class_names,
+                    task=task,
+                    layout=DatasetLayout.DIRECT,
+                    val_leaf="val",
+                )
+                split_dirs = {
+                    "train": (config.get_train_images(), config.get_train_labels()),
+                    "val": (config.get_val_images(), config.get_val_labels()),
+                    "test": (config.get_test_images(), config.get_test_labels()),
+                }
+
+                for img_dir, lbl_dir in split_dirs.values():
                     img_dir.mkdir(parents=True, exist_ok=True)
                     lbl_dir.mkdir(parents=True, exist_ok=True)
 
+                exported_samples = 0
                 for sample in accepted_samples:
                     split_name = (sample.split or "train").lower()
-                    img_dir, lbl_dir = self._resolve_split_dirs(ds_root, split_name, layout)
+                    if split_name not in split_dirs:
+                        raise ValueError(
+                            f"Неизвестный split '{split_name}' у сэмпла {sample.stem}"
+                        )
+                    img_dir, lbl_dir = split_dirs[split_name]
 
                     s3_img_key = getattr(sample, "image_key", None) or image_key(
                         dataset_id, split_name, f"{sample.stem}.jpg"
@@ -74,28 +91,45 @@ class ExportService:
 
                     img_bytes = self.s3.get_bytes(s3_img_key)
                     if not img_bytes:
-                        continue
+                        raise ValueError(
+                            f"Не найден файл изображения для сэмпла {sample.stem}"
+                        )
 
                     img_ext = Path(s3_img_key).suffix or ".jpg"
                     (img_dir / f"{sample.stem}{img_ext}").write_bytes(img_bytes)
 
                     lbl_bytes = self.s3.get_bytes(s3_lbl_key) or b""
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
+                    exported_samples += 1
 
-                # Генерация конфига data.yaml для экспорта
                 yaml_data = self._build_yaml_dict(
-                    class_names=class_names, task=task, layout=layout
+                    class_names=class_names, task=task
                 )
                 (ds_root / "data.yaml").write_text(
                     yaml.safe_dump(yaml_data, allow_unicode=True, sort_keys=False),
                     encoding="utf-8",
                 )
 
+                dataset = Dataset(config=config, is_cache=False, is_strict=True)
+                health = dataset.health()
+                if not health["is_healthy"]:
+                    raise ValueError(
+                        f"acmenra-ds обнаружила ошибки в экспорте: {health['errors']}"
+                    )
+                if len(dataset) != exported_samples:
+                    raise ValueError(
+                        "acmenra-ds загрузила не все экспортируемые изображения "
+                        f"({len(dataset)} из {exported_samples})"
+                    )
+
                 zip_path = tmp_dir / f"dataset_{dataset_id}_export_{export_id}.zip"
                 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                    for file_path in ds_root.rglob("*"):
-                        if file_path.is_file():
-                            zf.write(file_path, arcname=str(file_path.relative_to(ds_root)))
+                    for file_path in sorted(ds_root.rglob("*")):
+                        arcname = file_path.relative_to(ds_root).as_posix()
+                        if file_path.is_dir():
+                            zf.writestr(f"{arcname}/", "")
+                        else:
+                            zf.write(file_path, arcname=arcname)
 
                 s3_zip = export_zip_key(dataset_id=dataset_id, export_id=export_id)
                 self.s3.put_bytes(
@@ -108,7 +142,7 @@ class ExportService:
             return {
                 "export_id": export_id,
                 "status": "completed",
-                "exported_samples": len(accepted_samples),
+                "exported_samples": exported_samples,
                 "download_url": download_url,
             }
 
@@ -117,34 +151,14 @@ class ExportService:
             raise
 
     @staticmethod
-    def _resolve_split_dirs(
-        root: Path, split_name: str, layout: DatasetLayout
-    ) -> tuple[Path, Path]:
-        if layout == DatasetLayout.REVERSE:
-            return root / "images" / split_name, root / "labels" / split_name
-        return root / split_name / "images", root / split_name / "labels"
-
-    @staticmethod
     def _build_yaml_dict(
         class_names: list[str],
         task: TaskType,
-        layout: DatasetLayout,
     ) -> dict:
-        paths = (
-            {
-                "train": "images/train",
-                "val": "images/val",
-                "test": "images/test",
-            }
-            if layout == DatasetLayout.REVERSE
-            else {
-                "train": "train/images",
-                "val": "val/images",
-                "test": "test/images",
-            }
-        )
         return {
-            **paths,
+            "train": "train/images",
+            "val": "val/images",
+            "test": "test/images",
             "nc": len(class_names),
             "names": list(class_names),
             "task": task.value,

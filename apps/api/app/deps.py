@@ -10,6 +10,7 @@ from core.application.dataset_service import DatasetService
 from core.application.export_service import ExportService
 from core.application.import_service import ImportService
 from core.infrastructure.auth.tokens import decode_access_token
+from core.infrastructure.email.smtp import SMTPEmailService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.sql.base import get_db
 
@@ -23,6 +24,10 @@ _s3_client = S3Client()
 
 def get_s3_client() -> S3Client:
     return _s3_client
+
+
+def get_email_service() -> SMTPEmailService:
+    return SMTPEmailService.from_env()
 
 
 def get_db_connection():

@@ -116,3 +116,19 @@ hub/
   # datasets/{dataset_id}/thumbs/{sample_id}.jpg
   # exports/{export_id}.zip
 ```
+
+## SMTP
+
+Для отправки писем настройте переменные окружения backend:
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=user@example.com
+SMTP_PASSWORD=change-me
+SMTP_FROM_EMAIL=user@example.com
+SMTP_SECURITY=starttls
+SMTP_TIMEOUT_SECONDS=10
+```
+
+`SMTP_SECURITY` принимает `starttls` (по умолчанию), `ssl` или `none`; для `ssl` порт по умолчанию `465`, для остальных режимов — `587`. Логин и пароль можно не задавать для SMTP-сервера без авторизации. Если SMTP не настроен, приложение запускается, но вызов отправки завершится понятной ошибкой. Сервис доступен в API через `get_email_service` из `apps.api.app.deps`; прикладной сценарий должен вызвать `send_email(to_email, subject, body)`.

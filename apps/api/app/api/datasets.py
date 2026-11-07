@@ -7,17 +7,27 @@ from typing import Optional
 import yaml
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
-from apps.api.app.deps import CurrentUser, get_current_user, get_dataset_service
+from apps.api.app.deps import (
+    CurrentUser,
+    get_current_user,
+    get_dataset_or_404,
+    get_dataset_service,
+    get_sample_repo,
+    get_s3_client,
+    require_dataset_role,
+)
 from core.application.dataset_service import DatasetService
 from core.application.import_service import resolve_dataset_root
 from core.application.visualizer import (
     STORAGE_DIR,
     build_dataset_gallery,
+    find_dataset_gallery_image,
     load_acmenra_dataset,
     resolve_yaml_path,
 )
 from core.domain.enums import TaskTypeEnum
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
+from core.infrastructure.s3.client import S3Client
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -92,6 +102,72 @@ def create_dataset(
         initial_classes=payload.get("classes"),
     )
     return {"dataset_id": dataset_id, "message": "Датасет успешно создан в БД"}
+
+
+@router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dataset(
+    dataset_id: int,
+    user: CurrentUser = Depends(require_dataset_role({"owner"})),
+    dataset=Depends(get_dataset_or_404),
+    service: DatasetService = Depends(get_dataset_service),
+    s3: S3Client = Depends(get_s3_client),
+) -> None:
+    """Удаляет датасет владельца, его файлы и связанные записи."""
+    s3.delete_prefix(f"datasets/{dataset_id}/")
+
+    legacy_storage = STORAGE_DIR / f"dataset_{dataset_id}"
+    if legacy_storage.exists():
+        shutil.rmtree(legacy_storage)
+
+    service.delete_dataset(dataset_id=dataset_id)
+
+
+@router.delete("/{dataset_id}/gallery-item", status_code=status.HTTP_204_NO_CONTENT)
+def delete_gallery_item(
+    dataset_id: int,
+    filename: str = Query(...),
+    split: str = Query("train"),
+    user: CurrentUser = Depends(require_dataset_role({"owner"})),
+    dataset=Depends(get_dataset_or_404),
+    s3: S3Client = Depends(get_s3_client),
+    sample_repo=Depends(get_sample_repo),
+) -> None:
+    """Удаляет картинку и связанные файлы из legacy-галереи датасета."""
+    if Path(filename).name != filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректное имя файла")
+
+    normalized_split = split.lower()
+    if normalized_split not in {"train", "val", "valid", "test"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный split")
+
+    raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
+    if not raw_dir.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Изображение не найдено")
+
+    try:
+        sample_paths = find_dataset_gallery_image(raw_dir, normalized_split, filename)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    if sample_paths is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Изображение не найдено")
+
+    image_path, label_path = sample_paths
+    image_path.unlink(missing_ok=True)
+    if label_path is not None:
+        label_path.unlink(missing_ok=True)
+
+    cached_split = STORAGE_DIR / f"dataset_{dataset_id}" / normalized_split
+    (cached_split / "images" / filename).unlink(missing_ok=True)
+    (cached_split / "masks" / f"{Path(filename).stem}_mask.png").unlink(missing_ok=True)
+
+    for sample in sample_repo.list_by_stem(
+        dataset_id=dataset_id,
+        split=normalized_split,
+        stem=Path(filename).stem,
+    ):
+        s3.delete_many([sample.image_key, sample.label_key, sample.thumb_key])
+        sample_repo.delete(sample_id=sample.id)
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)

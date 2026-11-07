@@ -68,7 +68,12 @@ class DatasetService:
                 "classes": classes,
                 "images_count": images_count,
                 "cover_url": cover_url,
+                "is_owner": row.owner_id == user_id,
+                "my_role": self.memberships.get_user_role(dataset_id=row.id, user_id=user_id),
                 "created_at": str(row.created_at) if row.created_at else None,
             })
 
         return catalog
+
+    def delete_dataset(self, dataset_id: int) -> None:
+        self.datasets.delete(dataset_id=dataset_id)

@@ -1,5 +1,6 @@
 # core/infrastructure/s3/client.py
 import os
+import shutil
 from pathlib import Path
 
 
@@ -53,6 +54,22 @@ class S3Client:
         for key in keys:
             if key:
                 self.delete(key)
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Удаляет все файлы локального S3-хранилища под заданным префиксом."""
+        relative_prefix = Path(prefix)
+        if relative_prefix.is_absolute() or ".." in relative_prefix.parts:
+            raise ValueError("Invalid storage prefix")
+
+        root = self.storage_dir.resolve()
+        target = (root / relative_prefix).resolve()
+        if root not in target.parents:
+            raise ValueError("Invalid storage prefix")
+
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
 
     def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
         """Возвращает локальный URL (аналог presigned URL в S3)."""

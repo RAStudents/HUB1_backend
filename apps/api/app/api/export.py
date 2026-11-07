@@ -1,8 +1,7 @@
 ﻿# apps/api/app/api/export.py
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from acmenra_cv import TaskType
-from acmenra_ds import DatasetLayout
 from apps.api.app.deps import (
     CurrentUser,
     get_current_user,
@@ -22,21 +21,16 @@ router = APIRouter(prefix="/datasets/{dataset_id}/exports", tags=["export"])
 @router.post("", response_model=ExportStatusDTO, status_code=status.HTTP_201_CREATED)
 def start_export(
     dataset_id: int,
-    layout: str = Query("direct", description="direct (train/images) | reverse (images/train)"),
     user: CurrentUser = Depends(require_dataset_role({"owner"})), # <--- Ограничили только владельцем
     dataset=Depends(get_dataset_or_404),
     service: ExportService = Depends(get_export_service),
 ) -> ExportStatusDTO:
-    """Запускает сборку ZIP-архива из accepted-кадров и возвращает статус + ссылку."""
-    ds_layout = (
-        DatasetLayout.REVERSE if layout.lower() == "reverse" else DatasetLayout.DIRECT
-    )
+    """Создаёт ZIP с принятыми кадрами в прямой раскладке YOLO."""
     try:
         result = service.build_export_zip(
             dataset_id=dataset_id,
             user_id=user.id,
             task=TaskType(dataset.task),
-            layout=ds_layout,
         )
         return ExportStatusDTO(**result)
     except PermissionError as exc:
