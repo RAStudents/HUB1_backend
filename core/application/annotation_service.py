@@ -149,6 +149,7 @@ class AnnotationService:
             is_labeled=bool(instances),
             parse_error=None,
         )
+        self.samples.set_status(sample_id=sample_id, status="in_progress")
 
         if self.events is not None:
             self.events.log(

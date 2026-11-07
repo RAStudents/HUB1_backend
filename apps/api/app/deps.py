@@ -9,6 +9,7 @@ from core.application.auth_service import AuthService
 from core.application.dataset_service import DatasetService
 from core.application.export_service import ExportService
 from core.application.import_service import ImportService
+from core.application.review_service import ReviewService
 from core.infrastructure.auth.tokens import decode_access_token
 from core.infrastructure.email.smtp import SMTPEmailService
 from core.infrastructure.s3.client import S3Client
@@ -70,6 +71,10 @@ def get_membership_repo(db=Depends(get_db_connection)):
 def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
+
+def get_event_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.events import EventRepository
+    return EventRepository(db)
 
 
 # --- Аутентификация ---
@@ -185,4 +190,16 @@ def get_export_service(
         class_repo=class_repo,
         export_repo=export_repo,
         membership_repo=membership_repo,
+    )
+
+
+def get_review_service(
+    sample_repo=Depends(get_sample_repo),
+    membership_repo=Depends(get_membership_repo),
+    event_repo=Depends(get_event_repo),
+) -> ReviewService:
+    return ReviewService(
+        sample_repo=sample_repo,
+        membership_repo=membership_repo,
+        event_repo=event_repo,
     )

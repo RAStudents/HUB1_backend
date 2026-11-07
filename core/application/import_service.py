@@ -9,7 +9,7 @@ from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit
 
 from core.infrastructure.cv.labels import build_category_enum, parse_label_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.media.convert import normalize_image_file
+from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
@@ -53,6 +53,23 @@ def find_yaml_file(root: Path) -> Path | None:
     return yaml_files[0] if yaml_files else None
 
 
+def normalize_dataset_images(root: Path) -> None:
+    for source_path in root.rglob("*"):
+        if not source_path.is_file() or source_path.suffix.lower() not in CONVERT_EXTENSIONS:
+            continue
+
+        image_bytes, normalized_name, _ = normalize_image_file(source_path)
+        normalized_path = source_path.with_name(normalized_name)
+        if normalized_path.exists():
+            raise ValueError(
+                f"Невозможно нормализовать {source_path.name}: "
+                f"файл {normalized_path.name} уже существует"
+            )
+
+        normalized_path.write_bytes(image_bytes)
+        source_path.unlink()
+
+
 def build_acmenra_dataset(
     root: Path,
     task: TaskType,
@@ -83,6 +100,13 @@ def build_acmenra_dataset(
 
     category_enum = build_category_enum(names)
     layout = detect_layout(root)
+    val_leaf = (
+        "valid"
+        if (root / "valid").is_dir() or (root / "images" / "valid").is_dir()
+        else "val"
+    )
+    has_val = (root / val_leaf).is_dir() or (root / "images" / val_leaf).is_dir()
+    has_test = (root / "test").is_dir() or (root / "images" / "test").is_dir()
 
     task_str = raw_cfg.get("task")
     try:
@@ -93,9 +117,13 @@ def build_acmenra_dataset(
     # Передаем конфигурацию напрямую в acmenra-ds, без ручных симлинков
     config = Config(
         root=root,
+        train="train",
+        val=val_leaf if has_val else None,
+        test="test" if has_test else None,
         names=names,
         task=resolved_task,
         layout=layout,
+        val_leaf=val_leaf,
     )
 
     return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
@@ -120,6 +148,7 @@ class ImportService:
         with scratch_dir(prefix=f"import_ds_{dataset_id}_") as tmp_dir:
             raw_root = extract_zip_safely(zip_source, tmp_dir)
             root = resolve_dataset_root(raw_root)
+            normalize_dataset_images(root)
 
             persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
             if persistent_raw_dir.exists():
@@ -196,6 +225,11 @@ class ImportService:
                             thumb_key=s3_thb_key,
                             is_labeled=bool(instances),
                             parse_error=parse_error,
+                            status=(
+                                "accepted"
+                                if instances and parse_error is None
+                                else "unlabeled"
+                            ),
                         )
 
                     imported_count += 1

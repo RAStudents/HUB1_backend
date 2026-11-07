@@ -1,7 +1,7 @@
 ﻿# apps/api/app/api/router.py
 from fastapi import APIRouter
 
-from apps.api.app.api import auth, datasets, samples, annotations, export
+from apps.api.app.api import auth, datasets, samples, annotations, export, review
 
 api_router = APIRouter(prefix="/api")
 
@@ -11,3 +11,4 @@ api_router.include_router(datasets.router)
 api_router.include_router(samples.router)
 api_router.include_router(annotations.router)
 api_router.include_router(export.router)
+api_router.include_router(review.router)

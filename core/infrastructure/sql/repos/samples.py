@@ -17,6 +17,7 @@ class SampleRepository:
         thumb_key: str,
         is_labeled: bool = False,
         parse_error: str | None = None,
+        status: str = "unlabeled",
     ):
         """Создаёт запись сэмпла и возвращает её из БД."""
         query = samples_table.insert().values(
@@ -28,7 +29,7 @@ class SampleRepository:
             thumb_key=thumb_key,
             is_labeled=is_labeled,
             parse_error=parse_error,
-            status="unlabeled",
+            status=status,
         )
         result = self.db.execute(query)
         self.db.commit()
@@ -111,6 +112,23 @@ class SampleRepository:
 
         all_rows = self.db.execute(query).fetchall()
         return len(all_rows), all_rows[offset : offset + limit]
+
+    def list_by_stem(self, dataset_id: int, split: str, stem: str) -> list:
+        """Возвращает сэмплы с указанным именем файла в сплите датасета."""
+        query = samples_table.select().where(
+            (samples_table.c.dataset_id == dataset_id)
+            & (samples_table.c.split == split)
+            & (samples_table.c.stem == stem)
+        )
+        return self.db.execute(query).fetchall()
+
+    def list_for_split(self, dataset_id: int, split: str) -> list:
+        """Возвращает сэмплы датасета в выбранном сплите."""
+        query = samples_table.select().where(
+            (samples_table.c.dataset_id == dataset_id)
+            & (samples_table.c.split == split)
+        )
+        return self.db.execute(query).fetchall()
 
     def delete(self, sample_id: int) -> None:
         """Удаляет сэмпл из БД."""

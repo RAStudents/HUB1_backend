@@ -98,7 +98,10 @@ def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
     return []
 
 
-def load_acmenra_dataset(yaml_or_dir_path: Path) -> Dataset:
+def load_acmenra_dataset(
+    yaml_or_dir_path: Path,
+    fallback_task: TaskType | None = None,
+) -> Dataset:
     path_obj = Path(yaml_or_dir_path)
     if path_obj.is_dir():
         yaml_path = resolve_yaml_path(path_obj)
@@ -125,11 +128,11 @@ def load_acmenra_dataset(yaml_or_dir_path: Path) -> Dataset:
     
     # Строгое чтение task из конфига, без дефолтов и попыток угадывания
     task_str = raw_cfg.get("task")
-    if not task_str:
+    if not task_str and fallback_task is None:
         raise ValueError(f"В конфигурационном файле '{yaml_path.name}' обязательно должен быть явно указан параметр 'task'.")
     
     try:
-        task = TaskType(task_str)
+        task = TaskType(task_str) if task_str else fallback_task
     except ValueError:
         raise ValueError(f"Неизвестный тип задачи '{task_str}' в файле '{yaml_path.name}'.")
 
@@ -153,6 +156,7 @@ def load_acmenra_dataset(yaml_or_dir_path: Path) -> Dataset:
         names=names,
         task=task,
         layout=layout,
+        val_leaf=val_candidate,
     )
 
     return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
@@ -199,17 +203,41 @@ def _find_samples_fallback(root: Path, split_name: str) -> list[tuple[Path, Path
     return result
 
 
+def find_dataset_gallery_image(
+    root: Path,
+    split_name: str,
+    filename: str,
+) -> tuple[Path, Path | None] | None:
+    if Path(filename).name != filename or "/" in filename or "\\" in filename:
+        raise ValueError("Некорректное имя файла")
+
+    split_names = (split_name,)
+    if split_name == "valid":
+        split_names = ("valid", "val")
+    elif split_name == "val":
+        split_names = ("val", "valid")
+
+    for candidate_split in split_names:
+        for image_path, label_path in _find_samples_fallback(root, candidate_split):
+            if image_path.name == filename:
+                return image_path, label_path
+
+    return None
+
+
 def build_dataset_gallery(
     dataset_id: int,
     yaml_path: str | Path,
     split_name: str = "train",
     limit: int = 50,
     base_url: str = "http://127.0.0.1:8000",
+    class_ids: set[int] | None = None,
+    fallback_task: TaskType | None = None,
 ) -> List[Dict[str, Any]]:
     resolved_yaml = resolve_yaml_path(yaml_path)
     root = resolve_dataset_root(resolved_yaml.parent)
 
-    ds = load_acmenra_dataset(resolved_yaml)
+    ds = load_acmenra_dataset(resolved_yaml, fallback_task=fallback_task)
     class_names = ds.names or []
 
     samples_to_process = []
@@ -243,7 +271,6 @@ def build_dataset_gallery(
 
         stem = img_path.stem
         dest_img_path = img_out_dir / img_path.name
-        dest_mask_path = mask_out_dir / f"{stem}_mask.png"
 
         img_array = read_image_unicode(img_path)
         if img_array is None:
@@ -259,6 +286,23 @@ def build_dataset_gallery(
         if label_path and label_path.exists():
             instances = parse_label_unicode(ds, label_path)
 
+        annotation_counts: dict[int, int] = {}
+        for instance in instances:
+            annotation_counts[instance.class_id] = (
+                annotation_counts.get(instance.class_id, 0) + 1
+            )
+        visible_instances = (
+            instances
+            if class_ids is None
+            else [instance for instance in instances if instance.class_id in class_ids]
+        )
+        class_suffix = (
+            "_classes_" + "_".join(str(class_id) for class_id in sorted(class_ids))
+            if class_ids is not None
+            else ""
+        )
+        dest_mask_path = mask_out_dir / f"{stem}_mask{class_suffix}.png"
+
         try:
             shutil.copy2(img_path, dest_img_path)
         except Exception:
@@ -266,7 +310,7 @@ def build_dataset_gallery(
 
         masked_array = render_thumbnail_array(
             frame=img_array,
-            instances=instances,
+            instances=visible_instances,
             task=ds.task,
         )
         write_image_unicode(dest_mask_path, masked_array)
@@ -282,9 +326,22 @@ def build_dataset_gallery(
             ),
             "mask_url": (
                 f"{base_url}/storage/dataset_{dataset_id}"
-                f"/{split_name}/masks/{quote(f'{stem}_mask.png')}?v={cache_bust}"
+                f"/{split_name}/masks/{quote(dest_mask_path.name)}?v={cache_bust}"
             ),
             "objects_count": len(instances),
+            "visible_objects_count": len(visible_instances),
+            "annotation_classes": [
+                {
+                    "id": class_id,
+                    "name": (
+                        class_names[class_id]
+                        if 0 <= class_id < len(class_names)
+                        else f"Класс {class_id}"
+                    ),
+                    "count": count,
+                }
+                for class_id, count in sorted(annotation_counts.items())
+            ],
             "task": str(ds.task),
         })
 

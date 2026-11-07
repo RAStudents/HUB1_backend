@@ -1,4 +1,5 @@
 # core/application/export_service.py
+import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -7,7 +8,8 @@ import yaml
 from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout
 
-from core.infrastructure.media.scratch import scratch_dir
+from core.infrastructure.media.convert import normalize_image_file
+from core.infrastructure.media.scratch import scratch_dir, scratch_file
 from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
 
 class ExportService:
@@ -74,12 +76,26 @@ class ExportService:
                     lbl_dir.mkdir(parents=True, exist_ok=True)
 
                 exported_samples = 0
+                exported_stems: set[tuple[str, str]] = set()
+                populated_splits: set[str] = set()
                 for sample in accepted_samples:
                     split_name = (sample.split or "train").lower()
                     if split_name not in split_dirs:
                         raise ValueError(
                             f"Неизвестный split '{split_name}' у сэмпла {sample.stem}"
                         )
+                    if (
+                        Path(sample.stem).name != sample.stem
+                        or "/" in sample.stem
+                        or "\\" in sample.stem
+                    ):
+                        raise ValueError(f"Некорректное имя сэмпла: {sample.stem}")
+                    stem_key = (split_name, sample.stem)
+                    if stem_key in exported_stems:
+                        raise ValueError(
+                            f"Повторяется имя сэмпла '{sample.stem}' в сплите '{split_name}'"
+                        )
+                    exported_stems.add(stem_key)
                     img_dir, lbl_dir = split_dirs[split_name]
 
                     s3_img_key = getattr(sample, "image_key", None) or image_key(
@@ -95,20 +111,25 @@ class ExportService:
                             f"Не найден файл изображения для сэмпла {sample.stem}"
                         )
 
-                    img_ext = Path(s3_img_key).suffix or ".jpg"
-                    (img_dir / f"{sample.stem}{img_ext}").write_bytes(img_bytes)
+                    with scratch_file(
+                        suffix=Path(s3_img_key).suffix or ".jpg",
+                        data=img_bytes,
+                    ) as image_path:
+                        normalized_bytes, normalized_filename, _ = normalize_image_file(
+                            image_path
+                        )
+
+                    image_ext = Path(normalized_filename).suffix.lower()
+                    if image_ext not in {".png", ".jpg", ".jpeg"}:
+                        raise ValueError(
+                            f"Неподдерживаемый формат изображения в сэмпле {sample.stem}"
+                        )
+                    (img_dir / f"{sample.stem}{image_ext}").write_bytes(normalized_bytes)
 
                     lbl_bytes = self.s3.get_bytes(s3_lbl_key) or b""
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
                     exported_samples += 1
-
-                yaml_data = self._build_yaml_dict(
-                    class_names=class_names, task=task
-                )
-                (ds_root / "data.yaml").write_text(
-                    yaml.safe_dump(yaml_data, allow_unicode=True, sort_keys=False),
-                    encoding="utf-8",
-                )
+                    populated_splits.add(split_name)
 
                 dataset = Dataset(config=config, is_cache=False, is_strict=True)
                 health = dataset.health()
@@ -121,6 +142,20 @@ class ExportService:
                         "acmenra-ds загрузила не все экспортируемые изображения "
                         f"({len(dataset)} из {exported_samples})"
                     )
+
+                for split_name in split_dirs:
+                    if split_name not in populated_splits:
+                        shutil.rmtree(ds_root / split_name)
+
+                yaml_data = self._build_yaml_dict(
+                    class_names=class_names,
+                    task=task,
+                    splits=populated_splits,
+                )
+                (ds_root / "data.yaml").write_text(
+                    yaml.safe_dump(yaml_data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8",
+                )
 
                 zip_path = tmp_dir / f"dataset_{dataset_id}_export_{export_id}.zip"
                 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -136,7 +171,11 @@ class ExportService:
                     s3_zip, zip_path.read_bytes(), content_type="application/zip"
                 )
 
-            self.exports.mark_completed(export_id=export_id, s3_key=s3_zip)
+            self.exports.mark_completed(
+                export_id=export_id,
+                s3_key=s3_zip,
+                exported_samples=exported_samples,
+            )
             download_url = self.s3.get_presigned_url(s3_zip)
 
             return {
@@ -154,12 +193,16 @@ class ExportService:
     def _build_yaml_dict(
         class_names: list[str],
         task: TaskType,
+        splits: set[str],
     ) -> dict:
-        return {
-            "train": "train/images",
-            "val": "val/images",
-            "test": "test/images",
-            "nc": len(class_names),
-            "names": list(class_names),
-            "task": task.value,
+        yaml_data = {
+            split_name: f"{split_name}/images"
+            for split_name in ("train", "val", "test")
+            if split_name in splits
         }
+        yaml_data.update(
+            nc=len(class_names),
+            names=list(class_names),
+            task=task.value,
+        )
+        return yaml_data
