@@ -8,15 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class Event:
-    def __init__(
-        self,
-        id: int | None,
-        dataset_id: int,
-        sample_id: int | None,
-        user_id: int,
-        action: str,
-        created_at: datetime | None = None,
-    ):
+    def __init__(self,
+                 id: int | None,
+                 dataset_id: int,
+                 sample_id: int | None,
+                 user_id: int,
+                 action: str,
+                 created_at: datetime | None = None):
         self.id = id
         self.dataset_id = dataset_id
         self.sample_id = sample_id

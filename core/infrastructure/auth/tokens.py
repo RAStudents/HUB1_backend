@@ -14,7 +14,8 @@ ALGORITHM = "HS256"
 DEFAULT_TTL = timedelta(days=7)
 
 
-def create_access_token(user_id: int, expires_delta: timedelta = DEFAULT_TTL) -> str:
+def create_access_token(user_id: int,
+                        expires_delta: timedelta = DEFAULT_TTL) -> str:
     """Создаёт подписанный JWT с идентификатором пользователя."""
     expire = datetime.now(timezone.utc) + expires_delta
     payload = {"sub": str(user_id), "exp": expire}

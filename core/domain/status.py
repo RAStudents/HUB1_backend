@@ -17,7 +17,9 @@ class StatusTransitionValidator:
     }
 
     @classmethod
-    def can_transition(cls, current: SampleStatusEnum, target: SampleStatusEnum) -> bool:
+    def can_transition(cls,
+                       current: SampleStatusEnum,
+                       target: SampleStatusEnum) -> bool:
         if current == target:
             return True
         return target in cls.ALLOWED_TRANSITIONS.get(current, set())

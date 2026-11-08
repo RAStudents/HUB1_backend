@@ -1,6 +1,8 @@
+# core/infrastructure/email/smtp.py
+
 import os
-import smtplib
 import ssl
+import smtplib
 import logging
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -36,7 +38,8 @@ class SMTPSettings:
 
 
 class SMTPEmailService:
-    def __init__(self, settings: SMTPSettings):
+    def __init__(self,
+                 settings: SMTPSettings):
         if settings.security not in {"ssl", "starttls", "none"}:
             raise ValueError("SMTP_SECURITY должен быть ssl, starttls или none")
         if not 1 <= settings.port <= 65535:
@@ -51,7 +54,10 @@ class SMTPEmailService:
     def from_env(cls) -> "SMTPEmailService":
         return cls(SMTPSettings.from_env())
 
-    def send_email(self, to_email: str, subject: str, body: str) -> None:
+    def send_email(self,
+                   to_email: str,
+                   subject: str,
+                   body: str) -> None:
         if not self.settings.host or not self.settings.from_email:
             raise RuntimeError(
                 "SMTP не настроен: задайте SMTP_HOST и SMTP_FROM_EMAIL"
