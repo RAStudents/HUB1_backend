@@ -1,4 +1,6 @@
 # core/application/visualizer.py
+
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -11,6 +13,10 @@ from acmenra_ds import Config, Dataset, DatasetLayout
 
 from core.infrastructure.cv.labels import build_category_enum
 from core.infrastructure.cv.thumbs import render_thumbnail_array
+
+
+logger = logging.getLogger(__name__)
+
 
 STORAGE_DIR = Path("storage")
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")

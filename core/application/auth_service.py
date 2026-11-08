@@ -1,8 +1,14 @@
 # core/application/auth_service.py
+
+import logging
 from typing import Any
 
 from core.infrastructure.auth.passwords import hash_password, verify_password
 from core.infrastructure.auth.tokens import create_access_token
+
+
+logger = logging.getLogger(__name__)
+
 
 _YANDEX_OAUTH_MARKER = "oauth_yandex"
 

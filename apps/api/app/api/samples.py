@@ -1,4 +1,6 @@
 # apps/api/app/api/samples.py
+
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +29,10 @@ from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["samples"])
 

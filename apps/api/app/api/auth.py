@@ -1,11 +1,16 @@
 # apps/api/app/api/auth.py
-import os
 
+import os
+import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from apps.api.app.deps import CurrentUser, get_auth_service, get_current_user
 from core.application.auth_service import AuthService
+
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,7 +34,8 @@ def _require_yandex_configured() -> None:
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED, summary="Регистрация по email и паролю")
-def register(payload: dict, service: AuthService = Depends(get_auth_service)):
+def register(payload: dict,
+             service: AuthService = Depends(get_auth_service)):
     try:
         return service.register(
             email=payload.get("email", ""),
@@ -41,7 +47,8 @@ def register(payload: dict, service: AuthService = Depends(get_auth_service)):
 
 
 @router.post("/login", summary="Вход по email и паролю")
-def login(payload: dict, service: AuthService = Depends(get_auth_service)):
+def login(payload: dict,
+          service: AuthService = Depends(get_auth_service)):
     try:
         return service.authenticate(
             email=payload.get("email", ""),
@@ -52,10 +59,8 @@ def login(payload: dict, service: AuthService = Depends(get_auth_service)):
 
 
 @router.get("/me", summary="Профиль текущего пользователя")
-def get_me(
-    user: CurrentUser = Depends(get_current_user),
-    service: AuthService = Depends(get_auth_service),
-):
+def get_me(user: CurrentUser = Depends(get_current_user),
+           service: AuthService = Depends(get_auth_service)):
     try:
         return service.get_profile(user_id=user.id)
     except ValueError as exc:
@@ -63,11 +68,9 @@ def get_me(
 
 
 @router.patch("/me", summary="Изменить отображаемое имя в профиле")
-def update_me(
-    payload: dict,
-    user: CurrentUser = Depends(get_current_user),
-    service: AuthService = Depends(get_auth_service),
-):
+def update_me(payload: dict,
+              user: CurrentUser = Depends(get_current_user),
+              service: AuthService = Depends(get_auth_service)):
     try:
         return service.update_profile(user_id=user.id, name=payload.get("name", ""))
     except ValueError as exc:
@@ -92,10 +95,8 @@ def yandex_login():
 
 
 @router.get("/yandex/callback", summary="Колбэк Яндекс OAuth")
-async def yandex_callback(
-    code: str,
-    service: AuthService = Depends(get_auth_service),
-):
+async def yandex_callback(code: str,
+                          service: AuthService = Depends(get_auth_service)):
     _require_yandex_configured()
 
     async with httpx.AsyncClient() as client:

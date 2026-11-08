@@ -1,7 +1,12 @@
 # apps/api/app/schemas/sample.py
+
+import logging
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
+
+
+logger = logging.getLogger(__name__)
 
 
 class UploadUrlRequest(BaseModel):

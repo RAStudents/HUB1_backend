@@ -1,4 +1,6 @@
 # core/infrastructure/cv/thumbs.py
+
+import logging
 from pathlib import Path
 from typing import List
 
@@ -6,6 +8,10 @@ import cv2
 import numpy as np
 from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 from acmenra_ds import ImageParser
+
+
+logger = logging.getLogger(__name__)
+
 
 # Контрастная палитра для раскраски классов (RGB/BGR кортежи)
 DEFAULT_PALETTE: List[tuple] = [

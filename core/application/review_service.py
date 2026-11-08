@@ -1,7 +1,12 @@
+﻿
+import logging
 from typing import Any, Literal
 
 from core.domain.enums import SampleStatusEnum
 from core.domain.status import StatusTransitionValidator
+
+
+logger = logging.getLogger(__name__)
 
 
 ReviewDecision = Literal["accepted", "rejected"]

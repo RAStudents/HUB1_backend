@@ -1,8 +1,12 @@
 import os
 import smtplib
 import ssl
+import logging
 from dataclasses import dataclass
 from email.message import EmailMessage
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)

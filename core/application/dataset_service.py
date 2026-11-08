@@ -1,7 +1,13 @@
 # core/application/dataset_service.py
+
+import logging
 from pathlib import Path
 from typing import Any, List
 from urllib.parse import quote
+
+
+logger = logging.getLogger(__name__)
+
 
 _DEFAULT_CLASSES = ["object_a", "object_b"]
 STORAGE_DIR = Path("storage")

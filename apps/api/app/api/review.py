@@ -1,4 +1,6 @@
 ﻿# apps/api/app/api/review.py
+
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from apps.api.app.deps import (
@@ -9,6 +11,10 @@ from apps.api.app.deps import (
 )
 from apps.api.app.schemas.review import ReviewDecisionDTO, ReviewStatusDTO
 from core.application.review_service import ReviewService
+
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(
     prefix="/datasets/{dataset_id}/samples",

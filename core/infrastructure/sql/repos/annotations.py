@@ -1,17 +1,20 @@
 # core/infrastructure/sql/repos/annotations.py
+
+import logging
 from core.infrastructure.sql.schema import annotations_table
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnnotationRepository:
     def __init__(self, db_conn):
         self.db = db_conn
 
-    def replace_sample_annotations(
-        self,
-        sample_id: int,
-        class_ids: list[int],
-        user_id: int,
-    ) -> None:
+    def replace_sample_annotations(self,
+                                   sample_id: int,
+                                   class_ids: list[int],
+                                   user_id: int) -> None:
         """
         Атомарно заменяет аннотации кадра:
         удаляет старые записи и вставляет актуальные из редактора.

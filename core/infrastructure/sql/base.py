@@ -1,10 +1,15 @@
 # core/infrastructure/sql/base.py
-import os
 
+import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from core.infrastructure.sql.schema import metadata
+
+
+logger = logging.getLogger(__name__)
+
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./hub_mvp.db")
 

@@ -1,4 +1,6 @@
 # core/application/annotation_service.py
+
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
@@ -10,6 +12,9 @@ from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnnotationService:

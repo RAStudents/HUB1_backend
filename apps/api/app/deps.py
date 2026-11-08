@@ -1,4 +1,6 @@
 # apps/api/app/deps.py
+
+import logging
 from typing import Callable, Set
 
 from fastapi import Depends, HTTPException, status
@@ -14,6 +16,10 @@ from core.infrastructure.auth.tokens import decode_access_token
 from core.infrastructure.email.smtp import SMTPEmailService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.sql.base import get_db
+
+
+logger = logging.getLogger(__name__)
+
 
 security = HTTPBearer()
 

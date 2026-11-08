@@ -1,7 +1,13 @@
 ﻿# apps/api/app/api/router.py
+
+import logging
 from fastapi import APIRouter
 
 from apps.api.app.api import auth, datasets, samples, annotations, export, review
+
+
+logger = logging.getLogger(__name__)
+
 
 api_router = APIRouter(prefix="/api")
 

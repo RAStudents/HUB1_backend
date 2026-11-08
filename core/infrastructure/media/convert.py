@@ -1,9 +1,15 @@
 # core/infrastructure/media/convert.py
+
+import logging
 from io import BytesIO
 from pathlib import Path
 
 import pillow_heif
 from PIL import Image
+
+
+logger = logging.getLogger(__name__)
+
 
 # Регистрируем поддержку HEIC/HEIF в Pillow один раз при импорте модуля
 pillow_heif.register_heif_opener()
@@ -12,7 +18,8 @@ KEEP_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 CONVERT_EXTENSIONS = {".heic", ".heif", ".webp", ".bmp", ".tiff", ".tif"}
 
 
-def normalize_image_file(src_path: Path, jpeg_quality: int = 92) -> tuple[bytes, str, str]:
+def normalize_image_file(src_path: Path,
+                         jpeg_quality: int = 92) -> tuple[bytes, str, str]:
     """
     Нормализует изображение к поддерживаемому формату.
 

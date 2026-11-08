@@ -1,7 +1,13 @@
 # core/infrastructure/auth/tokens.py
+
 import os
 import jwt
+import logging
 from datetime import datetime, timedelta, timezone
+
+
+logger = logging.getLogger(__name__)
+
 
 SECRET_KEY = os.getenv("JWT_SECRET", "super_secret_hub_key")
 ALGORITHM = "HS256"

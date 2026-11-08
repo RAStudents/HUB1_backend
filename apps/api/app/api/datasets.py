@@ -1,5 +1,7 @@
 # apps/api/app/api/datasets.py
+
 import shutil
+import logging
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -30,26 +32,26 @@ from core.domain.enums import TaskTypeEnum
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.client import S3Client
 
+
+logger = logging.getLogger(__name__)
+
+
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
 @router.get("/")
-def list_my_datasets(
-    request: Request,
-    user: CurrentUser = Depends(get_current_user),
-    service: DatasetService = Depends(get_dataset_service),
-):
+def list_my_datasets(request: Request,
+                     user: CurrentUser = Depends(get_current_user),
+                     service: DatasetService = Depends(get_dataset_service)):
     base_url = str(request.base_url).rstrip("/")
     items = service.list_user_datasets(user_id=user.id, base_url=base_url)
     return {"total": len(items), "items": items}
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
-def create_dataset(
-    payload: dict,
-    user: CurrentUser = Depends(get_current_user),
-    service: DatasetService = Depends(get_dataset_service),
-):
+def create_dataset(payload: dict,
+                   user: CurrentUser = Depends(get_current_user),
+                   service: DatasetService = Depends(get_dataset_service)):
     task_str = payload.get("task", "segment")
     task_enum = TaskTypeEnum(task_str) if isinstance(task_str, str) else task_str
 
@@ -65,13 +67,11 @@ def create_dataset(
 
 
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_dataset(
-    dataset_id: int,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    dataset=Depends(get_dataset_or_404),
-    service: DatasetService = Depends(get_dataset_service),
-    s3: S3Client = Depends(get_s3_client),
-) -> None:
+def delete_dataset(dataset_id: int,
+                   user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                   dataset=Depends(get_dataset_or_404),
+                   service: DatasetService = Depends(get_dataset_service),
+                   s3: S3Client = Depends(get_s3_client)) -> None:
     """Удаляет датасет владельца, его файлы и связанные записи."""
     s3.delete_prefix(f"datasets/{dataset_id}/")
 
@@ -83,15 +83,13 @@ def delete_dataset(
 
 
 @router.delete("/{dataset_id}/gallery-item", status_code=status.HTTP_204_NO_CONTENT)
-def delete_gallery_item(
-    dataset_id: int,
-    filename: str = Query(...),
-    split: str = Query("train"),
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    dataset=Depends(get_dataset_or_404),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-) -> None:
+def delete_gallery_item(dataset_id: int,
+                        filename: str = Query(...),
+                        split: str = Query("train"),
+                        user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                        dataset=Depends(get_dataset_or_404),
+                        s3: S3Client = Depends(get_s3_client),
+                        sample_repo=Depends(get_sample_repo)) -> None:
     """Удаляет картинку и связанные файлы из legacy-галереи датасета."""
     if Path(filename).name != filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректное имя файла")
@@ -131,17 +129,15 @@ def delete_gallery_item(
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
-def upload_and_save_dataset(
-    request: Request,
-    name: str = Form(...),
-    task: str = Form(...),
-    is_private: bool = Form(True),
-    file: UploadFile = File(...),
-    user: CurrentUser = Depends(get_current_user),
-    service: DatasetService = Depends(get_dataset_service),
-    import_service: ImportService = Depends(get_import_service),
-    s3: S3Client = Depends(get_s3_client),
-):
+def upload_and_save_dataset(request: Request,
+                            name: str = Form(...),
+                            task: str = Form(...),
+                            is_private: bool = Form(True),
+                            file: UploadFile = File(...),
+                            user: CurrentUser = Depends(get_current_user),
+                            service: DatasetService = Depends(get_dataset_service),
+                            import_service: ImportService = Depends(get_import_service),
+                            s3: S3Client = Depends(get_s3_client)):
     if not file.filename or Path(file.filename).suffix.lower() != ".zip":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -208,17 +204,15 @@ def upload_and_save_dataset(
 
 
 @router.get("/{dataset_id}/gallery")
-def get_dataset_gallery(
-    dataset_id: int,
-    request: Request,
-    yaml_path: Optional[str] = Query(None),
-    split: str = Query("train"),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    class_ids: list[int] | None = Query(None),
-    dataset=Depends(get_dataset_or_404),
-    sample_repo=Depends(get_sample_repo),
-):
+def get_dataset_gallery(dataset_id: int,
+                        request: Request,
+                        yaml_path: Optional[str] = Query(None),
+                        split: str = Query("train"),
+                        limit: int = Query(50, ge=1, le=500),
+                        offset: int = Query(0, ge=0),
+                        class_ids: list[int] | None = Query(None),
+                        dataset=Depends(get_dataset_or_404),
+                        sample_repo=Depends(get_sample_repo)):
     base_url = str(request.base_url).rstrip("/")
     persistent_dir = STORAGE_DIR / f"dataset_{dataset_id}"
     raw_dir = persistent_dir / "raw"

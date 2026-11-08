@@ -1,10 +1,15 @@
 # core/infrastructure/cv/labels.py
+
+import logging
 from enum import Enum
 from pathlib import Path
 from typing import List, Sequence
 
 from acmenra_cv import Instance, TaskType
 from acmenra_ds import LabelParser, LabelWriter
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_category_enum(class_names: Sequence[str]) -> type[Enum]:
@@ -26,12 +31,10 @@ def build_category_enum(class_names: Sequence[str]) -> type[Enum]:
     return Enum("DatasetCategory", members)
 
 
-def parse_label_file(
-    path: Path,
-    class_names: Sequence[str],
-    task: TaskType,
-    is_strict: bool = False,
-) -> List[Instance]:
+def parse_label_file(path: Path,
+                     class_names: Sequence[str],
+                     task: TaskType,
+                     is_strict: bool = False) -> List[Instance]:
     """
     Читает YOLO .txt файл напрямую через LabelParser из acmenra-ds.
     """
@@ -50,13 +53,11 @@ def parse_label_file(
         return []
 
 
-def write_label_file(
-    path: Path,
-    instances: List[Instance],
-    class_names: Sequence[str],
-    task: TaskType,
-    is_strict: bool = True,
-) -> None:
+def write_label_file(path: Path,
+                     instances: List[Instance],
+                     class_names: Sequence[str],
+                     task: TaskType,
+                     is_strict: bool = True) -> None:
     """
     Записывает список Instance в YOLO .txt файл через LabelWriter из acmenra-ds.
     """

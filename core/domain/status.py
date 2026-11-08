@@ -1,5 +1,10 @@
 ﻿# core/domain/status.py
+
+import logging
 from core.domain.enums import SampleStatusEnum
+
+
+logger = logging.getLogger(__name__)
 
 
 class StatusTransitionValidator:

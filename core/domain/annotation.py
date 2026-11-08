@@ -1,4 +1,11 @@
 ﻿# core/domain/annotation.py
+
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
 class AnnotationMetadata:
     def __init__(
         self,

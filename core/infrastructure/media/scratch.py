@@ -1,11 +1,16 @@
 # core/infrastructure/media/scratch.py
+
 import os
 import shutil
 import tempfile
 import zipfile
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -22,7 +27,8 @@ def scratch_dir(prefix: str = "hub_") -> Iterator[Path]:
 
 
 @contextmanager
-def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
+def scratch_file(suffix: str = "",
+                 data: bytes | None = None) -> Iterator[Path]:
     """
     Создаёт временный файл и удаляет его при выходе из блока with.
     Если передан data — записывает байты сразу после создания файла.
@@ -40,7 +46,8 @@ def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
         path.unlink(missing_ok=True)
 
 
-def extract_zip_safely(zip_bytes_or_path: bytes | Path, dest_dir: Path) -> Path:
+def extract_zip_safely(zip_bytes_or_path: bytes | Path,
+                       dest_dir: Path) -> Path:
     """
     Распаковывает ZIP-архив в dest_dir с защитой от Zip Slip-атаки.
 

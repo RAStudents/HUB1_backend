@@ -1,4 +1,6 @@
 # core/application/import_service.py
+
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, List
@@ -12,6 +14,10 @@ from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+
+logger = logging.getLogger(__name__)
+
 
 STORAGE_DIR = Path("storage")
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")

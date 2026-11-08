@@ -1,4 +1,5 @@
 # apps/api/app/main.py
+
 import logging
 import os
 from pathlib import Path
@@ -20,7 +21,9 @@ from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
 from core.infrastructure.sql.base import init_db
 
+
 logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="HUB Dataset Annotation Platform (MVP)",

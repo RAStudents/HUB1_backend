@@ -1,9 +1,14 @@
 # core/infrastructure/sql/schema.py
 
+import logging
 from sqlalchemy import (
     MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.sql import func
+
+
+logger = logging.getLogger(__name__)
+
 
 metadata = MetaData()
 

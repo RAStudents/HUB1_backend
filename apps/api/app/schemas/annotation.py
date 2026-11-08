@@ -1,6 +1,11 @@
 ﻿# apps/api/app/schemas/annotation.py
+
+import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
+
+
+logger = logging.getLogger(__name__)
 
 
 class BoxDTO(BaseModel):

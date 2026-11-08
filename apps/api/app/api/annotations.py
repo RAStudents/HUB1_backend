@@ -1,4 +1,6 @@
 ﻿# apps/api/app/api/annotations.py
+
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from acmenra_cv import TaskType
@@ -11,6 +13,10 @@ from apps.api.app.deps import (
 from apps.api.app.schemas.annotation import FrameAnnotationsDTO
 from core.application.annotation_service import AnnotationService
 
+
+logger = logging.getLogger(__name__)
+
+
 router = APIRouter(
     prefix="/datasets/{dataset_id}/samples/{sample_id}/annotations",
     tags=["annotations"],
@@ -18,13 +24,11 @@ router = APIRouter(
 
 
 @router.get("", response_model=FrameAnnotationsDTO)
-def get_annotations(
-    dataset_id: int,
-    sample_id: int,
-    user: CurrentUser = Depends(get_current_user),
-    dataset=Depends(get_dataset_or_404),
-    service: AnnotationService = Depends(get_annotation_service),
-) -> FrameAnnotationsDTO:
+def get_annotations(dataset_id: int,
+                    sample_id: int,
+                    user: CurrentUser = Depends(get_current_user),
+                    dataset=Depends(get_dataset_or_404),
+                    service: AnnotationService = Depends(get_annotation_service)) -> FrameAnnotationsDTO:
     """Отдаёт нормализованную разметку кадра (Box / OBB в градусах / Polygon)."""
     try:
         return service.get_frame_annotations(
@@ -41,14 +45,12 @@ def get_annotations(
 
 
 @router.put("", response_model=FrameAnnotationsDTO)
-def save_annotations(
-    dataset_id: int,
-    sample_id: int,
-    payload: FrameAnnotationsDTO,
-    user: CurrentUser = Depends(get_current_user),
-    dataset=Depends(get_dataset_or_404),
-    service: AnnotationService = Depends(get_annotation_service),
-) -> FrameAnnotationsDTO:
+def save_annotations(dataset_id: int,
+                     sample_id: int,
+                     payload: FrameAnnotationsDTO,
+                     user: CurrentUser = Depends(get_current_user),
+                     dataset=Depends(get_dataset_or_404),
+                     service: AnnotationService = Depends(get_annotation_service)) -> FrameAnnotationsDTO:
     """
     Принимает сохранение из редактора, перезаписывает .txt через LabelWriter
     и перерисовывает тумбу с масками через Drawer.

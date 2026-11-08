@@ -1,5 +1,7 @@
 # core/infrastructure/cv/mapper.py
+
 import math
+import logging
 from typing import List, Sequence
 
 from acmenra_cv import Box, Instance, Obb, Point, Polygon, TaskType
@@ -13,7 +15,11 @@ from apps.api.app.schemas.annotation import (
 from core.infrastructure.cv.labels import build_category_enum
 
 
-def instance_to_dto(instance: Instance, task: TaskType) -> AnnotationItemDTO:
+logger = logging.getLogger(__name__)
+
+
+def instance_to_dto(instance: Instance,
+                    task: TaskType) -> AnnotationItemDTO:
     """
     Конвертирует Instance из acmenra-cv в DTO для API.
 
@@ -51,11 +57,9 @@ def instance_to_dto(instance: Instance, task: TaskType) -> AnnotationItemDTO:
     )
 
 
-def dto_to_instance(
-    dto: AnnotationItemDTO,
-    task: TaskType,
-    class_names: Sequence[str],
-) -> Instance:
+def dto_to_instance(dto: AnnotationItemDTO,
+                    task: TaskType,
+                    class_names: Sequence[str]) -> Instance:
     """
     Собирает Instance из DTO фронтенда для сохранения в .txt и отрисовки Drawer-ом.
 
@@ -110,15 +114,14 @@ def dto_to_instance(
     raise ValueError(f"Некорректные данные геометрии для задачи {task.value}")
 
 
-def instances_to_dtos(instances: List[Instance], task: TaskType) -> List[AnnotationItemDTO]:
+def instances_to_dtos(instances: List[Instance],
+                      task: TaskType) -> List[AnnotationItemDTO]:
     """Конвертирует список Instance в список DTO."""
     return [instance_to_dto(inst, task) for inst in instances]
 
 
-def dtos_to_instances(
-    dtos: List[AnnotationItemDTO],
-    task: TaskType,
-    class_names: Sequence[str],
-) -> List[Instance]:
+def dtos_to_instances(dtos: List[AnnotationItemDTO],
+                      task: TaskType,
+                      class_names: Sequence[str]) -> List[Instance]:
     """Конвертирует список DTO в список Instance."""
     return [dto_to_instance(d, task, class_names) for d in dtos]

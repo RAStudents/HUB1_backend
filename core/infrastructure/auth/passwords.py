@@ -1,6 +1,11 @@
 # core/infrastructure/auth/passwords.py
+
 import hashlib
 import secrets
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:

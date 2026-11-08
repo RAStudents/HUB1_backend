@@ -1,5 +1,10 @@
 ﻿# core/domain/membership.py
+
+import logging
 from core.domain.enums import RoleEnum
+
+
+logger = logging.getLogger(__name__)
 
 
 class Membership:

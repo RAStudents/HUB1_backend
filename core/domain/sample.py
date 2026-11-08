@@ -1,6 +1,11 @@
 ﻿# core/domain/sample.py
+
+import logging
 from datetime import datetime
 from core.domain.enums import SplitEnum, SampleStatusEnum
+
+
+logger = logging.getLogger(__name__)
 
 
 class Sample:

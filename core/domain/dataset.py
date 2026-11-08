@@ -1,6 +1,11 @@
 ﻿# core/domain/dataset.py
+
+import logging
 from datetime import datetime, timezone
 from core.domain.enums import TaskTypeEnum
+
+
+logger = logging.getLogger(__name__)
 
 
 class Dataset:

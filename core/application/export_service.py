@@ -1,4 +1,6 @@
 # core/application/export_service.py
+
+import logging
 import shutil
 import zipfile
 from pathlib import Path
@@ -11,6 +13,10 @@ from acmenra_ds import Config, Dataset, DatasetLayout
 from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
 from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
+
+
+logger = logging.getLogger(__name__)
+
 
 class ExportService:
     def __init__(

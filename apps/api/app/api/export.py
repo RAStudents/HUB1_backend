@@ -1,4 +1,6 @@
 ﻿# apps/api/app/api/export.py
+
+import logging
 from io import BytesIO
 from urllib.parse import quote
 
@@ -18,17 +20,20 @@ from core.application.export_service import ExportService
 from core.infrastructure.s3.client import S3Client
 from apps.api.app.deps import require_dataset_role
 
-router = APIRouter(prefix="/datasets/{dataset_id}/exports", tags=["export"])
+
+logger = logging.getLogger(__name__)
+
+
+router = APIRouter(prefix="/datasets/{dataset_id}/exports",
+                   tags=["export"])
 
 
 @router.post("", response_model=ExportStatusDTO, status_code=status.HTTP_201_CREATED)
-def start_export(
-    dataset_id: int,
-    request: Request,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    dataset=Depends(get_dataset_or_404),
-    service: ExportService = Depends(get_export_service),
-) -> ExportStatusDTO:
+def start_export(dataset_id: int,
+                 request: Request,
+                 user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                 dataset=Depends(get_dataset_or_404),
+                 service: ExportService = Depends(get_export_service)) -> ExportStatusDTO:
     """Создаёт ZIP с принятыми кадрами в прямой раскладке YOLO."""
     try:
         result = service.build_export_zip(
@@ -53,12 +58,10 @@ def start_export(
         Depends(get_dataset_or_404),
     ],
 )
-def get_export_status(
-    dataset_id: int,
-    export_id: int,
-    request: Request,
-    export_repo=Depends(get_export_repo),
-) -> ExportStatusDTO:
+def get_export_status(dataset_id: int,
+                      export_id: int,
+                      request: Request,
+                      export_repo=Depends(get_export_repo)) -> ExportStatusDTO:
     """Проверяет статус сборки архива и возвращает ссылку на его скачивание."""
     record = export_repo.get_by_id(dataset_id=dataset_id, export_id=export_id)
     if record is None:
@@ -86,13 +89,11 @@ def get_export_status(
         Depends(get_dataset_or_404),
     ],
 )
-def download_export(
-    dataset_id: int,
-    export_id: int,
-    dataset=Depends(get_dataset_or_404),
-    export_repo=Depends(get_export_repo),
-    s3: S3Client = Depends(get_s3_client),
-):
+def download_export(dataset_id: int,
+                    export_id: int,
+                    dataset=Depends(get_dataset_or_404),
+                    export_repo=Depends(get_export_repo),
+                    s3: S3Client = Depends(get_s3_client)):
     record = export_repo.get_by_id(dataset_id=dataset_id, export_id=export_id)
     if record is None or record.status != "completed" or not record.s3_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
