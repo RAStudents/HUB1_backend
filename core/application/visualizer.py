@@ -1,13 +1,15 @@
 # core/application/visualizer.py
 
-import logging
+import cv2
+import yaml
 import shutil
+import logging
+import numpy as np
+
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import quote
-import cv2
-import numpy as np
-import yaml
+
 from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout
 
@@ -91,7 +93,8 @@ def resolve_yaml_path(path_input: str | Path) -> Path:
     raise ValueError(f"Файл конфигурации датасета не найден по пути: {path_input}")
 
 
-def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
+def parse_label_unicode(ds: Dataset,
+                        label_path: Path) -> list:
     """Строгий нативный парсинг разметки без хаков и автоматических подгонок."""
     if not label_path or not label_path.is_file():
         return []
@@ -104,10 +107,8 @@ def parse_label_unicode(ds: Dataset, label_path: Path) -> list:
     return []
 
 
-def load_acmenra_dataset(
-    yaml_or_dir_path: Path,
-    fallback_task: TaskType | None = None,
-) -> Dataset:
+def load_acmenra_dataset(yaml_or_dir_path: Path,
+                         fallback_task: TaskType | None = None) -> Dataset:
     path_obj = Path(yaml_or_dir_path)
     if path_obj.is_dir():
         yaml_path = resolve_yaml_path(path_obj)
@@ -168,7 +169,8 @@ def load_acmenra_dataset(
     return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
 
 
-def _find_samples_fallback(root: Path, split_name: str) -> list[tuple[Path, Path | None]]:
+def _find_samples_fallback(root: Path,
+                           split_name: str) -> list[tuple[Path, Path | None]]:
     img_candidates = [
         root / split_name / "images",
         root / "images" / split_name,
@@ -209,11 +211,9 @@ def _find_samples_fallback(root: Path, split_name: str) -> list[tuple[Path, Path
     return result
 
 
-def find_dataset_gallery_image(
-    root: Path,
-    split_name: str,
-    filename: str,
-) -> tuple[Path, Path | None] | None:
+def find_dataset_gallery_image(root: Path,
+                               split_name: str,
+                               filename: str) -> tuple[Path, Path | None] | None:
     if Path(filename).name != filename or "/" in filename or "\\" in filename:
         raise ValueError("Некорректное имя файла")
 
@@ -231,16 +231,14 @@ def find_dataset_gallery_image(
     return None
 
 
-def build_dataset_gallery(
-    dataset_id: int,
-    yaml_path: str | Path,
-    split_name: str = "train",
-    limit: int = 50,
-    offset: int = 0,
-    base_url: str = "http://127.0.0.1:8000",
-    class_ids: set[int] | None = None,
-    fallback_task: TaskType | None = None,
-) -> List[Dict[str, Any]]:
+def build_dataset_gallery(dataset_id: int,
+                          yaml_path: str | Path,
+                          split_name: str = "train",
+                          limit: int = 50,
+                          offset: int = 0,
+                          base_url: str = "http://127.0.0.1:8000",
+                          class_ids: set[int] | None = None,
+                          fallback_task: TaskType | None = None) -> List[Dict[str, Any]]:
     resolved_yaml = resolve_yaml_path(yaml_path)
     root = resolve_dataset_root(resolved_yaml.parent)
 

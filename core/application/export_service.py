@@ -1,12 +1,11 @@
 # core/application/export_service.py
 
-import logging
+import yaml
 import shutil
 import zipfile
-from pathlib import Path
+import logging
 from typing import Any
-
-import yaml
+from pathlib import Path
 from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout
 
@@ -19,26 +18,22 @@ logger = logging.getLogger(__name__)
 
 
 class ExportService:
-    def __init__(
-        self,
-        s3_client: Any,
-        sample_repo: Any,
-        class_repo: Any,
-        export_repo: Any,
-        membership_repo: Any,
-    ):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 class_repo: Any,
+                 export_repo: Any,
+                 membership_repo: Any):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo
         self.exports = export_repo
         self.memberships = membership_repo
 
-    def build_export_zip(
-        self,
-        dataset_id: int,
-        user_id: int,
-        task: TaskType,
-    ) -> dict:
+    def build_export_zip(self,
+                         dataset_id: int,
+                         user_id: int,
+                         task: TaskType) -> dict:
         """
         Собирает архив датасета только из сэмплов со статусом 'accepted',
         проверяет его через acmenra-ds, сохраняет в прямой раскладке, загружает ZIP
@@ -196,11 +191,9 @@ class ExportService:
             raise
 
     @staticmethod
-    def _build_yaml_dict(
-        class_names: list[str],
-        task: TaskType,
-        splits: set[str],
-    ) -> dict:
+    def _build_yaml_dict(class_names: list[str],
+                         task: TaskType,
+                         splits: set[str]) -> dict:
         yaml_data = {
             split_name: f"{split_name}/images"
             for split_name in ("train", "val", "test")

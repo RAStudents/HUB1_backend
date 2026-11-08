@@ -90,9 +90,7 @@ class CurrentUser:
         self.id = id
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> CurrentUser:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> CurrentUser:
     """Декодирует JWT из заголовка Authorization и возвращает текущего пользователя."""
     user_id = decode_access_token(credentials.credentials)
     if not user_id:
@@ -126,11 +124,9 @@ def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     return role_dependency
 
 
-def get_dataset_or_404(
-    dataset_id: int,
-    user: CurrentUser = Depends(get_current_user),
-    dataset_repo=Depends(get_dataset_repo),
-):
+def get_dataset_or_404(dataset_id: int,
+                       user: CurrentUser = Depends(get_current_user),
+                       dataset_repo=Depends(get_dataset_repo)):
     """Проверяет существование датасета (защита от IDOR)."""
     dataset = dataset_repo.get_by_id(dataset_id=dataset_id)
     if dataset is None:
@@ -147,11 +143,9 @@ def get_auth_service(user_repo=Depends(get_user_repo)) -> AuthService:
     return AuthService(user_repo=user_repo)
 
 
-def get_dataset_service(
-    dataset_repo=Depends(get_dataset_repo),
-    class_repo=Depends(get_class_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> DatasetService:
+def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
+                        class_repo=Depends(get_class_repo),
+                        membership_repo=Depends(get_membership_repo),) -> DatasetService:
     return DatasetService(
         dataset_repo=dataset_repo,
         class_repo=class_repo,
@@ -159,21 +153,21 @@ def get_dataset_service(
     )
 
 
-def get_import_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-) -> ImportService:
-    return ImportService(s3_client=s3, sample_repo=sample_repo, class_repo=class_repo)
+def get_import_service(s3: S3Client = Depends(get_s3_client),
+                       sample_repo=Depends(get_sample_repo),
+                       class_repo=Depends(get_class_repo),) -> ImportService:
+    return ImportService(
+        s3_client=s3,
+        sample_repo=sample_repo,
+        class_repo=class_repo
+    )
 
 
-def get_annotation_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    annotation_repo=Depends(get_annotation_repo),
-    class_repo=Depends(get_class_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> AnnotationService:
+def get_annotation_service(s3: S3Client = Depends(get_s3_client),
+                           sample_repo=Depends(get_sample_repo),
+                           annotation_repo=Depends(get_annotation_repo),
+                           class_repo=Depends(get_class_repo),
+                           membership_repo=Depends(get_membership_repo)) -> AnnotationService:
     return AnnotationService(
         s3_client=s3,
         sample_repo=sample_repo,
@@ -183,13 +177,11 @@ def get_annotation_service(
     )
 
 
-def get_export_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    export_repo=Depends(get_export_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> ExportService:
+def get_export_service(s3: S3Client = Depends(get_s3_client),
+                       sample_repo=Depends(get_sample_repo),
+                       class_repo=Depends(get_class_repo),
+                       export_repo=Depends(get_export_repo),
+                       membership_repo=Depends(get_membership_repo)) -> ExportService:
     return ExportService(
         s3_client=s3,
         sample_repo=sample_repo,
@@ -199,11 +191,9 @@ def get_export_service(
     )
 
 
-def get_review_service(
-    sample_repo=Depends(get_sample_repo),
-    membership_repo=Depends(get_membership_repo),
-    event_repo=Depends(get_event_repo),
-) -> ReviewService:
+def get_review_service(sample_repo=Depends(get_sample_repo),
+                       membership_repo=Depends(get_membership_repo),
+                       event_repo=Depends(get_event_repo)) -> ReviewService:
     return ReviewService(
         sample_repo=sample_repo,
         membership_repo=membership_repo,

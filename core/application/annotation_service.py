@@ -1,32 +1,31 @@
 # core/application/annotation_service.py
 
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
-
 from acmenra_cv import TaskType
-from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
+from datetime import datetime, timezone
+
+from core.infrastructure.media.scratch import scratch_file
+from core.infrastructure.cv.thumbs import render_thumbnail_bytes
+from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 from core.infrastructure.cv.labels import parse_label_file, write_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
-from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.media.scratch import scratch_file
-from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
 
 
 logger = logging.getLogger(__name__)
 
 
 class AnnotationService:
-    def __init__(
-        self,
-        s3_client: Any,
-        sample_repo: Any,
-        annotation_repo: Any,
-        class_repo: Any,
-        membership_repo: Any,
-        event_repo: Any | None = None,
-    ):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 annotation_repo: Any,
+                 class_repo: Any,
+                 membership_repo: Any,
+                 event_repo: Any | None = None):
         self.s3 = s3_client
         self.samples = sample_repo
         self.annotations = annotation_repo
@@ -34,13 +33,11 @@ class AnnotationService:
         self.memberships = membership_repo
         self.events = event_repo
 
-    def get_frame_annotations(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        task: TaskType,
-    ) -> FrameAnnotationsDTO:
+    def get_frame_annotations(self,
+                              dataset_id: int,
+                              sample_id: int,
+                              user_id: int,
+                              task: TaskType) -> FrameAnnotationsDTO:
         """
         Возвращает разметку кадра фронтенду:
         проверяет доступ → скачивает .txt из S3 → парсит через acmenra-cv → возвращает DTO.
@@ -73,14 +70,12 @@ class AnnotationService:
         dtos = instances_to_dtos(instances=instances, task=task)
         return FrameAnnotationsDTO(sample_id=sample_id, items=dtos)
 
-    def save_frame_annotations(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        task: TaskType,
-        items: List[AnnotationItemDTO],
-    ) -> FrameAnnotationsDTO:
+    def save_frame_annotations(self,
+                               dataset_id: int,
+                               sample_id: int,
+                               user_id: int,
+                               task: TaskType,
+                               items: List[AnnotationItemDTO]) -> FrameAnnotationsDTO:
         """
         Сохраняет разметку из редактора:
         1. Проверяет роль (owner | labeler) и активный lock на кадре.

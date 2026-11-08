@@ -1,9 +1,9 @@
 ﻿# apps/api/app/api/annotations.py
 
 import logging
+from acmenra_cv import TaskType
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from acmenra_cv import TaskType
 from apps.api.app.deps import (
     CurrentUser,
     get_annotation_service,

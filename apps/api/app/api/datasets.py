@@ -5,8 +5,8 @@ import logging
 import traceback
 from pathlib import Path
 from typing import Optional
-
 from acmenra_cv import TaskType
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from apps.api.app.deps import (
@@ -28,9 +28,10 @@ from core.application.visualizer import (
     load_acmenra_dataset,
     resolve_yaml_path,
 )
-from core.domain.enums import TaskTypeEnum
-from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
+
 from core.infrastructure.s3.client import S3Client
+from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
+
 
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def create_dataset(payload: dict,
                    user: CurrentUser = Depends(get_current_user),
                    service: DatasetService = Depends(get_dataset_service)):
     task_str = payload.get("task", "segment")
-    task_enum = TaskTypeEnum(task_str) if isinstance(task_str, str) else task_str
+    task_enum = TaskType(task_str) if isinstance(task_str, str) else task_str
 
     dataset_id = service.create_dataset(
         name=payload.get("name", "Unnamed Dataset"),

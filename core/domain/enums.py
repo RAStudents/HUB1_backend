@@ -7,12 +7,6 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
-class TaskTypeEnum(str, Enum):
-    DETECT = "detect"
-    OBB = "obb"
-    SEGMENT = "segment"
-
-
 class SplitEnum(str, Enum):
     TRAIN = "train"
     VAL = "val"

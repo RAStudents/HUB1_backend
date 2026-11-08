@@ -1,16 +1,17 @@
 # core/application/import_service.py
 
-import logging
+import yaml
 import shutil
+import logging
 from pathlib import Path
 from typing import Any, List
-
-import yaml
 from acmenra_cv import TaskType
+
 from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit
 
-from core.infrastructure.cv.labels import build_category_enum, parse_label_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
+from core.infrastructure.cv.labels import build_category_enum, parse_label_file
+
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
@@ -76,11 +77,9 @@ def normalize_dataset_images(root: Path) -> None:
         source_path.unlink()
 
 
-def build_acmenra_dataset(
-    root: Path,
-    task: TaskType,
-    fallback_names: List[str] | None = None,
-) -> Dataset:
+def build_acmenra_dataset(root: Path,
+                          task: TaskType,
+                          fallback_names: List[str] | None = None) -> Dataset:
     root = resolve_dataset_root(root)
     yaml_path = find_yaml_file(root)
 
@@ -132,22 +131,26 @@ def build_acmenra_dataset(
         val_leaf=val_leaf,
     )
 
-    return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
+    return Dataset(config=config,
+                   category=category_enum,
+                   is_cache=False,
+                   is_strict=False)
 
 
 class ImportService:
-    def __init__(self, s3_client: Any, sample_repo: Any, class_repo: Any):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 class_repo: Any):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo
 
-    def import_zip(
-        self,
-        dataset_id: int,
-        task: TaskType,
-        zip_source: bytes | Path,
-        existing_classes: List[str] | None = None,
-    ) -> dict:
+    def import_zip(self,
+                   dataset_id: int,
+                   task: TaskType,
+                   zip_source: bytes | Path,
+                   existing_classes: List[str] | None = None) -> dict:
         imported_count = 0
         errors_count = 0
 

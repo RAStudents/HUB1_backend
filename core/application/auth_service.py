@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 _YANDEX_OAUTH_MARKER = "oauth_yandex"
 
 
-def _build_token_response(user_id: int, email: str, name: str) -> dict:
+def _build_token_response(user_id: int,
+                          email: str,
+                          name: str) -> dict:
     """Собирает стандартный ответ с JWT-токеном."""
     return {
         "access_token": create_access_token(user_id=user_id),
@@ -25,10 +27,14 @@ def _build_token_response(user_id: int, email: str, name: str) -> dict:
 
 
 class AuthService:
-    def __init__(self, user_repo: Any):
+    def __init__(self,
+                 user_repo: Any):
         self.users = user_repo
 
-    def register(self, email: str, password: str, name: str) -> dict:
+    def register(self,
+                 email: str,
+                 password: str,
+                 name: str) -> dict:
         """Регистрирует нового пользователя по email и паролю."""
         if self.users.get_by_email(email):
             raise ValueError("Пользователь с таким email уже существует")
@@ -37,7 +43,9 @@ class AuthService:
         user_id = self.users.create(email=email, password_hash=pw_hash, name=name)
         return _build_token_response(user_id=user_id, email=email, name=name)
 
-    def authenticate(self, email: str, password: str) -> dict:
+    def authenticate(self,
+                     email: str,
+                     password: str) -> dict:
         """Вход по email и паролю."""
         user = self.users.get_by_email(email)
         if not user:
@@ -53,14 +61,21 @@ class AuthService:
 
         return _build_token_response(user_id=user.id, email=user.email, name=user.name)
 
-    def get_profile(self, user_id: int) -> dict:
+    def get_profile(self,
+                    user_id: int) -> dict:
         """Возвращает публичный профиль пользователя."""
         user = self.users.get_by_id(user_id)
         if not user:
             raise ValueError("Пользователь не найден")
-        return {"user_id": user.id, "email": user.email, "name": user.name}
+        return {
+            "user_id": user.id,
+            "email": user.email,
+            "name": user.name
+        }
 
-    def update_profile(self, user_id: int, name: str) -> dict:
+    def update_profile(self,
+                       user_id: int,
+                       name: str) -> dict:
         """Обновляет отображаемое имя пользователя."""
         clean_name = name.strip()
         if not clean_name:
@@ -68,7 +83,10 @@ class AuthService:
         self.users.update_name(user_id=user_id, name=clean_name)
         return self.get_profile(user_id)
 
-    def login_with_yandex(self, yandex_id: str, email: str, name: str) -> dict:
+    def login_with_yandex(self,
+                          yandex_id: str,
+                          email: str,
+                          name: str) -> dict:
         """
         Вход через Яндекс OAuth без создания дублирующих аккаунтов.
         Порядок поиска: по yandex_id → по email → создание нового пользователя.

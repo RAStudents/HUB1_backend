@@ -1,4 +1,5 @@
-﻿
+﻿# core/application/review_service.py
+
 import logging
 from typing import Any, Literal
 
@@ -13,17 +14,18 @@ ReviewDecision = Literal["accepted", "rejected"]
 
 
 class ReviewService:
-    def __init__(
-        self,
-        sample_repo: Any,
-        membership_repo: Any,
-        event_repo: Any | None = None,
-    ):
+    def __init__(self,
+                 sample_repo: Any,
+                 membership_repo: Any,
+                 event_repo: Any | None = None):
         self.samples = sample_repo
         self.memberships = membership_repo
         self.events = event_repo
 
-    def submit_for_review(self, dataset_id: int, sample_id: int, user_id: int) -> str:
+    def submit_for_review(self,
+                          dataset_id: int,
+                          sample_id: int,
+                          user_id: int) -> str:
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role not in {"owner", "labeler"}:
             raise PermissionError("Недостаточно прав для отправки кадра на проверку")
@@ -43,13 +45,11 @@ class ReviewService:
         self._log(dataset_id, sample_id, user_id, "sample_submitted_for_review")
         return target.value
 
-    def decide(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        decision: ReviewDecision,
-    ) -> str:
+    def decide(self,
+               dataset_id: int,
+               sample_id: int,
+               user_id: int,
+               decision: ReviewDecision) -> str:
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role != "owner":
             raise PermissionError("Только владелец датасета может проверять кадры")
@@ -67,7 +67,10 @@ class ReviewService:
         self._log(dataset_id, sample_id, user_id, f"sample_{target.value}")
         return target.value
 
-    def reopen_for_revision(self, dataset_id: int, sample_id: int, user_id: int) -> str:
+    def reopen_for_revision(self,
+                            dataset_id: int,
+                            sample_id: int,
+                            user_id: int) -> str:
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role not in {"owner", "labeler"}:
             raise PermissionError("Недостаточно прав для доработки кадра")
@@ -85,7 +88,11 @@ class ReviewService:
         self._log(dataset_id, sample_id, user_id, "sample_reopened_for_revision")
         return target.value
 
-    def _log(self, dataset_id: int, sample_id: int, user_id: int, action: str) -> None:
+    def _log(self,
+             dataset_id: int,
+             sample_id: int,
+             user_id: int,
+             action: str) -> None:
         if self.events is not None:
             self.events.log(
                 dataset_id=dataset_id,

@@ -2,12 +2,13 @@
 
 import os
 import shutil
-import tempfile
 import zipfile
 import logging
-from contextlib import contextmanager
+import tempfile
+
 from pathlib import Path
 from typing import Iterator
+from contextlib import contextmanager
 
 
 logger = logging.getLogger(__name__)

@@ -1,12 +1,12 @@
 # apps/api/app/api/auth.py
 
 import os
-import logging
 import httpx
+import logging
+from core.application.auth_service import AuthService
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from apps.api.app.deps import CurrentUser, get_auth_service, get_current_user
-from core.application.auth_service import AuthService
 
 
 logger = logging.getLogger(__name__)

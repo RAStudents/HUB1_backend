@@ -15,7 +15,8 @@ def hash_password(password: str) -> str:
     return f"{salt}${pwd_hash}"
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str,
+                    hashed_password: str) -> bool:
     """Проверяет пароль против сохранённого хэша. Возвращает False при любой ошибке."""
     try:
         salt, pwd_hash = hashed_password.split("$")

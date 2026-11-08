@@ -3,11 +3,11 @@
 import logging
 from io import BytesIO
 from urllib.parse import quote
+from acmenra_cv import TaskType
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from acmenra_cv import TaskType
 from apps.api.app.deps import (
     CurrentUser,
     get_dataset_or_404,

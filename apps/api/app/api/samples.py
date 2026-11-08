@@ -3,9 +3,9 @@
 import logging
 from pathlib import Path
 from typing import Optional
+from acmenra_cv import TaskType
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from acmenra_cv import TaskType
 
 from apps.api.app.deps import (
     CurrentUser,
@@ -23,11 +23,12 @@ from apps.api.app.schemas.sample import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
+
+from core.infrastructure.s3.client import S3Client
 from core.application.import_service import ImportService
+from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.convert import normalize_image_file
-from core.infrastructure.media.scratch import scratch_file
-from core.infrastructure.s3.client import S3Client
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
 
@@ -38,17 +39,15 @@ router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["samples"])
 
 
 @router.get("", response_model=GalleryPageDTO)
-def list_gallery_samples(
-    dataset_id: int,
-    split: Optional[str] = Query(None, description="train | val | test | None (все)"),
-    sample_status: Optional[str] = Query(None, alias="status"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(24, ge=1, le=100),
-    user: CurrentUser = Depends(get_current_user),
-    dataset=Depends(get_dataset_or_404),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-) -> GalleryPageDTO:
+def list_gallery_samples(dataset_id: int,
+                         split: Optional[str] = Query(None, description="train | val | test | None (все)"),
+                         sample_status: Optional[str] = Query(None, alias="status"),
+                         page: int = Query(1, ge=1),
+                         page_size: int = Query(24, ge=1, le=100),
+                         user: CurrentUser = Depends(get_current_user),
+                         dataset=Depends(get_dataset_or_404),
+                         s3: S3Client = Depends(get_s3_client),
+                         sample_repo=Depends(get_sample_repo)) -> GalleryPageDTO:
     """
     Галерея кадров с фильтрацией по сплиту и статусу.
     Генерирует presigned URL на оригинал и превью (тумбу с масками) для каждой карточки.
@@ -83,13 +82,11 @@ def list_gallery_samples(
 
 
 @router.post("/import-zip")
-async def import_dataset_zip(
-    dataset_id: int,
-    file: UploadFile = File(...),
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-    dataset=Depends(get_dataset_or_404),
-    import_service: ImportService = Depends(get_import_service),
-) -> dict:
+async def import_dataset_zip(dataset_id: int,
+                             file: UploadFile = File(...),
+                             user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                             dataset=Depends(get_dataset_or_404),
+                             import_service: ImportService = Depends(get_import_service)) -> dict:
     """Принимает ZIP с датасетом, проходит по train/val/test и строит все превью с масками."""
     zip_bytes = await file.read()
     try:
@@ -103,12 +100,10 @@ async def import_dataset_zip(
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
-def get_upload_url(
-    dataset_id: int,
-    req: UploadUrlRequest,
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-    s3: S3Client = Depends(get_s3_client),
-) -> UploadUrlResponse:
+def get_upload_url(dataset_id: int,
+                   req: UploadUrlRequest,
+                   user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                   s3: S3Client = Depends(get_s3_client)) -> UploadUrlResponse:
     """Выдаёт presigned PUT ссылку для прямой загрузки кадра во временный префикс S3."""
     raw_key = f"datasets/{dataset_id}/_incoming/{req.split.lower()}/{req.filename}"
     url = s3.get_presigned_upload_url(key=raw_key, content_type=req.content_type)
@@ -116,14 +111,12 @@ def get_upload_url(
 
 
 @router.post("/complete-upload", response_model=SampleCardDTO)
-def complete_upload(
-    dataset_id: int,
-    req: CompleteUploadRequest,
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-    dataset=Depends(get_dataset_or_404),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-) -> SampleCardDTO:
+def complete_upload(dataset_id: int,
+                    req: CompleteUploadRequest,
+                    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                    dataset=Depends(get_dataset_or_404),
+                    s3: S3Client = Depends(get_s3_client),
+                    sample_repo=Depends(get_sample_repo)) -> SampleCardDTO:
     """
     Завершает загрузку одиночного кадра:
     конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.
@@ -179,13 +172,11 @@ def complete_upload(
 
 
 @router.delete("/{sample_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_sample(
-    dataset_id: int,
-    sample_id: int,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-) -> None:
+def delete_sample(dataset_id: int,
+                  sample_id: int,
+                  user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                  s3: S3Client = Depends(get_s3_client),
+                  sample_repo=Depends(get_sample_repo)) -> None:
     """Удаляет сэмпл из БД и чистит его файлы (оригинал, .txt, превью) из S3."""
     row = sample_repo.get_by_id(dataset_id=dataset_id, sample_id=sample_id)
     if row is None:

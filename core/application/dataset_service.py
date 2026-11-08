@@ -14,20 +14,21 @@ STORAGE_DIR = Path("storage")
 
 
 class DatasetService:
-    def __init__(self, dataset_repo: Any, class_repo: Any, membership_repo: Any):
+    def __init__(self,
+                 dataset_repo: Any,
+                 class_repo: Any,
+                 membership_repo: Any):
         self.datasets = dataset_repo
         self.classes = class_repo
         self.memberships = membership_repo
 
-    def create_dataset(
-        self,
-        name: str,
-        task: Any,
-        owner_id: int,
-        description: str | None = None,
-        is_private: bool = True,
-        initial_classes: List[str] | None = None,
-    ) -> int:
+    def create_dataset(self,
+                       name: str,
+                       task: Any,
+                       owner_id: int,
+                       description: str | None = None,
+                       is_private: bool = True,
+                       initial_classes: List[str] | None = None) -> int:
         task_value = task.value if hasattr(task, "value") else str(task).split(".")[-1].lower()
 
         dataset_id = self.datasets.create(
@@ -43,7 +44,9 @@ class DatasetService:
 
         return dataset_id
 
-    def list_user_datasets(self, user_id: int, base_url: str = "http://127.0.0.1:8000") -> list[dict]:
+    def list_user_datasets(self,
+                           user_id: int,
+                           base_url: str = "http://127.0.0.1:8000") -> list[dict]: # TODO needs to rm fix link
         """Собирает каталог датасетов для главной страницы пользователя."""
         dataset_ids = self.memberships.list_datasets_for_user(user_id=user_id)
         rows = self.datasets.list_by_ids(dataset_ids)
@@ -81,5 +84,6 @@ class DatasetService:
 
         return catalog
 
-    def delete_dataset(self, dataset_id: int) -> None:
+    def delete_dataset(self,
+                       dataset_id: int) -> None:
         self.datasets.delete(dataset_id=dataset_id)
