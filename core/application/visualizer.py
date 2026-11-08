@@ -230,6 +230,7 @@ def build_dataset_gallery(
     yaml_path: str | Path,
     split_name: str = "train",
     limit: int = 50,
+    offset: int = 0,
     base_url: str = "http://127.0.0.1:8000",
     class_ids: set[int] | None = None,
     fallback_task: TaskType | None = None,
@@ -266,7 +267,9 @@ def build_dataset_gallery(
     gallery_items = []
 
     for idx, (img_path, label_path) in enumerate(samples_to_process):
-        if idx >= limit:
+        if idx < offset:
+            continue
+        if idx >= offset + limit:
             break
 
         stem = img_path.stem
