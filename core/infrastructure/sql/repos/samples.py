@@ -116,6 +116,33 @@ class SampleRepository:
         )
         return self.db.execute(query).fetchall()
 
+    def list_by_status_and_class_ids(
+        self,
+        dataset_id: int,
+        status: str,
+        class_ids: list[int],
+    ) -> list:
+        """Возвращает сэмплы с заданным статусом, содержащие любой из классов."""
+        matching_sample_ids = (
+            select(annotations_table.c.sample_id)
+            .select_from(
+                annotations_table.join(
+                    samples_table,
+                    annotations_table.c.sample_id == samples_table.c.id,
+                )
+            )
+            .where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.status == status,
+                annotations_table.c.class_id.in_(class_ids),
+            )
+            .distinct()
+        )
+        query = samples_table.select().where(
+            samples_table.c.id.in_(matching_sample_ids)
+        )
+        return self.db.execute(query).fetchall()
+
     def paginate(self,
                  dataset_id: int,
                  split: str | None,

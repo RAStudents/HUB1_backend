@@ -43,9 +43,6 @@ def start_export(dataset_id: int,
                  export_repo=Depends(get_export_repo),
                  service: ExportService = Depends(get_export_service)) -> ExportStatusDTO:
     """Создаёт ZIP с принятыми кадрами в прямой раскладке YOLO."""
-    accepted_samples = service.samples.list_by_status(
-        dataset_id=dataset_id, status="accepted"
-    )
     selected_splits = payload.splits if payload is not None else None
     if selected_splits is not None:
         if not selected_splits:
@@ -54,11 +51,6 @@ def start_export(dataset_id: int,
                 detail="Выберите хотя бы один сплит для экспорта",
             )
         selected_splits = sorted(set(selected_splits))
-        accepted_samples = [
-            sample
-            for sample in accepted_samples
-            if _normalize_split(sample.split) in selected_splits
-        ]
 
     class_names = service.classes.get_names(dataset_id=dataset_id)
     class_ids = payload.class_ids if payload is not None else None
@@ -75,6 +67,24 @@ def start_export(dataset_id: int,
                 detail=f"Неизвестные ID классов: {invalid_class_ids}",
             )
         class_ids = sorted(set(class_ids))
+
+    if class_ids is not None:
+        accepted_samples = service.samples.list_by_status_and_class_ids(
+            dataset_id=dataset_id,
+            status="accepted",
+            class_ids=class_ids,
+        )
+    else:
+        accepted_samples = service.samples.list_by_status(
+            dataset_id=dataset_id, status="accepted"
+        )
+
+    if selected_splits is not None:
+        accepted_samples = [
+            sample
+            for sample in accepted_samples
+            if _normalize_split(sample.split) in selected_splits
+        ]
 
     export_record = export_repo.create_export(
         dataset_id=dataset_id,
