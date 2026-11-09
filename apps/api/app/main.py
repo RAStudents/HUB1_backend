@@ -35,6 +35,12 @@ app = FastAPI(
 # Раздача статических файлов (превью и маски)
 STORAGE_DIR = Path("storage")
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+S3_STORAGE = get_s3_client()
+app.mount(
+    f"/storage/{S3_STORAGE.bucket}",
+    StaticFiles(directory=str(S3_STORAGE.storage_dir)),
+    name="s3-storage",
+)
 app.mount("/storage", StaticFiles(directory=str(STORAGE_DIR)), name="storage")
 
 # CORS для фронтенда
@@ -44,6 +50,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 app.include_router(api_router)

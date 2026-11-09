@@ -1,7 +1,6 @@
 # core/infrastructure/cv/labels.py
 
 import logging
-from enum import Enum
 from pathlib import Path
 from typing import List, Sequence
 

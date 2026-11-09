@@ -9,8 +9,9 @@ from acmenra_cv import TaskType
 
 from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit, make_category_enum
 
-from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.cv.labels import parse_label_file
+from core.infrastructure.cv.mapper import instances_to_dtos
+from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
@@ -138,13 +139,17 @@ def build_acmenra_dataset(root: Path,
 
 
 class ImportService:
-    def __init__(self,
-                 s3_client: Any,
-                 sample_repo: Any,
-                 class_repo: Any):
+    def __init__(
+        self,
+        s3_client: Any,
+        sample_repo: Any,
+        class_repo: Any,
+        annotation_repo: Any | None = None,
+    ):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo
+        self.annotations = annotation_repo
 
     def import_zip(self,
                    dataset_id: int,
@@ -225,7 +230,7 @@ class ImportService:
                     self.s3.put_bytes(s3_lbl_key, raw_txt, content_type="text/plain")
 
                     if self.samples is not None:
-                        self.samples.create_sample(
+                        created_sample = self.samples.create_sample(
                             dataset_id=dataset_id,
                             stem=sample.stem,
                             split=split_name,
@@ -240,6 +245,22 @@ class ImportService:
                                 else "unlabeled"
                             ),
                         )
+                        if self.annotations is not None:
+                            self.annotations.replace_sample_annotations(
+                                sample_id=created_sample.id,
+                                class_ids=[instance.class_id for instance in instances],
+                                user_id=None,
+                                commit=False,
+                            )
+                        self.samples.set_geometries(
+                            sample_id=created_sample.id,
+                            geometries=[
+                                item.model_dump(mode="json")
+                                for item in instances_to_dtos(instances, task)
+                            ],
+                            commit=False,
+                        )
+                        self.samples.commit()
 
                     imported_count += 1
 

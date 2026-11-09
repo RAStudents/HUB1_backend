@@ -230,14 +230,17 @@ def find_dataset_gallery_image(root: Path,
     return None
 
 
-def build_dataset_gallery(dataset_id: int,
-                          yaml_path: str | Path,
-                          split_name: str = "train",
-                          limit: int = 50,
-                          offset: int = 0,
-                          base_url: str = "http://127.0.0.1:8000",
-                          class_ids: set[int] | None = None,
-                          fallback_task: TaskType | None = None) -> List[Dict[str, Any]]:
+def build_dataset_gallery(
+    dataset_id: int,
+    yaml_path: str | Path,
+    split_name: str = "train",
+    limit: int = 50,
+    offset: int = 0,
+    base_url: str = "http://127.0.0.1:8000",
+    class_ids: set[int] | None = None,
+    fallback_task: TaskType | None = None,
+    filenames: set[str] | None = None,
+) -> tuple[List[Dict[str, Any]], int]:
     resolved_yaml = resolve_yaml_path(yaml_path)
     root = resolve_dataset_root(resolved_yaml.parent)
 
@@ -258,7 +261,7 @@ def build_dataset_gallery(dataset_id: int,
         samples_to_process = _find_samples_fallback(root, split_name)
 
     if not samples_to_process:
-        return []
+        return [], 0
 
     base_dir = STORAGE_DIR / f"dataset_{dataset_id}" / split_name
     img_out_dir = base_dir / "images"
@@ -270,23 +273,55 @@ def build_dataset_gallery(dataset_id: int,
     gallery_items = []
 
     for idx, (img_path, label_path) in enumerate(samples_to_process):
-        if idx < offset:
+        if filenames is not None:
+            if img_path.name not in filenames:
+                continue
+        elif idx < offset or idx >= offset + limit:
             continue
-        if idx >= offset + limit:
-            break
 
         stem = img_path.stem
         dest_img_path = img_out_dir / img_path.name
+        class_suffix = (
+            "_classes_" + "_".join(str(class_id) for class_id in sorted(class_ids))
+            if class_ids is not None
+            else ""
+        )
+        dest_mask_path = mask_out_dir / f"{stem}_mask{class_suffix}.png"
 
-        img_array = read_image_unicode(img_path)
-        if img_array is None:
-            try:
-                img_array = ds.image_parser.parse(path=img_path, is_strict=False)
-            except Exception:
-                img_array = None
+        source_image_mtime = img_path.stat().st_mtime if img_path.exists() else 0
+        image_is_current = (
+            dest_img_path.exists()
+            and dest_img_path.stat().st_mtime >= source_image_mtime
+        )
+        label_mtime = (
+            label_path.stat().st_mtime
+            if label_path and label_path.exists()
+            else 0
+        )
+        mask_is_current = (
+            dest_mask_path.exists()
+            and dest_mask_path.stat().st_mtime >= max(source_image_mtime, label_mtime)
+        )
 
-        if img_array is None:
+        img_array = None
+        if not image_is_current or not mask_is_current:
+            img_array = read_image_unicode(img_path)
+            if img_array is None:
+                try:
+                    img_array = ds.image_parser.parse(path=img_path, is_strict=False)
+                except Exception:
+                    img_array = None
+
+        if img_array is None and not image_is_current:
             continue
+
+        if not image_is_current:
+            try:
+                shutil.copy2(img_path, dest_img_path)
+            except Exception:
+                if img_array is None:
+                    continue
+                write_image_unicode(dest_img_path, img_array)
 
         instances = []
         if label_path and label_path.exists():
@@ -302,30 +337,24 @@ def build_dataset_gallery(dataset_id: int,
             if class_ids is None
             else [instance for instance in instances if instance.class_id in class_ids]
         )
-        class_suffix = (
-            "_classes_" + "_".join(str(class_id) for class_id in sorted(class_ids))
-            if class_ids is not None
-            else ""
-        )
-        dest_mask_path = mask_out_dir / f"{stem}_mask{class_suffix}.png"
 
-        try:
-            shutil.copy2(img_path, dest_img_path)
-        except Exception:
-            write_image_unicode(dest_img_path, img_array)
-
-        masked_array = render_thumbnail_array(
-            frame=img_array,
-            instances=visible_instances,
-            task=ds.task,
-        )
-        write_image_unicode(dest_mask_path, masked_array)
+        if not mask_is_current:
+            if img_array is None:
+                img_array = read_image_unicode(dest_img_path)
+            if img_array is not None:
+                masked_array = render_thumbnail_array(
+                    frame=img_array,
+                    instances=visible_instances,
+                    task=ds.task,
+                )
+                write_image_unicode(dest_mask_path, masked_array)
 
         cache_bust = int(dest_mask_path.stat().st_mtime) if dest_mask_path.exists() else 1
 
         gallery_items.append({
             "id": idx + 1,
             "filename": img_path.name,
+            "split": split_name,
             "image_url": (
                 f"{base_url}/storage/dataset_{dataset_id}"
                 f"/{split_name}/images/{quote(img_path.name)}?v={cache_bust}"
@@ -351,4 +380,4 @@ def build_dataset_gallery(dataset_id: int,
             "task": str(ds.task),
         })
 
-    return gallery_items
+    return gallery_items, len(samples_to_process)

@@ -4,7 +4,7 @@ hub/
   .env.example                       # DATABASE_URL, S3_*, YANDEX_CLIENT_ID/SECRET
   TASK.md
   docs/
-    DATA_CONTRACT.md                 # cv 0.3.2 / ds 0.2.0.2, yaml, txt, две раскладки, пустой txt, градусы в API / радианы в txt
+    DATA_CONTRACT.md                 # cv 0.3.2 / ds 0.2.1.6, yaml, txt, две раскладки, пустой txt, градусы в API / радианы в txt
     ARCHITECTURE.md                  # postgres = состояние, s3 = байты
     KEYBOARD.md                      # сохранить, undo, маски, следующий кадр
 

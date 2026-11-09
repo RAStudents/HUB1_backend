@@ -153,13 +153,17 @@ def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
     )
 
 
-def get_import_service(s3: S3Client = Depends(get_s3_client),
-                       sample_repo=Depends(get_sample_repo),
-                       class_repo=Depends(get_class_repo),) -> ImportService:
+def get_import_service(
+    s3: S3Client = Depends(get_s3_client),
+    sample_repo=Depends(get_sample_repo),
+    class_repo=Depends(get_class_repo),
+    annotation_repo=Depends(get_annotation_repo),
+) -> ImportService:
     return ImportService(
         s3_client=s3,
         sample_repo=sample_repo,
-        class_repo=class_repo
+        class_repo=class_repo,
+        annotation_repo=annotation_repo,
     )
 
 

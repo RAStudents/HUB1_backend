@@ -143,6 +143,13 @@ class AnnotationService:
                 class_ids=[inst.class_id for inst in instances],
                 user_id=user_id,
             )
+        self.samples.set_geometries(
+            sample_id=sample_id,
+            geometries=[
+                item.model_dump(mode="json")
+                for item in instances_to_dtos(instances=instances, task=task)
+            ],
+        )
 
         self.samples.mark_updated(
             sample_id=sample_id,

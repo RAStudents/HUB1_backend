@@ -34,6 +34,18 @@ class ClassRepository:
     def get_names(self,
                   dataset_id: int) -> list[str]:
         """Возвращает список имён классов датасета в порядке class_index."""
-        query = classes_table.select().where(classes_table.c.dataset_id == dataset_id)
+        query = (
+            classes_table.select()
+            .where(classes_table.c.dataset_id == dataset_id)
+            .order_by(classes_table.c.class_index)
+        )
         rows = self.db.execute(query).fetchall()
         return [row.name for row in rows]
+
+    def list_for_dataset(self, dataset_id: int) -> list:
+        query = (
+            classes_table.select()
+            .where(classes_table.c.dataset_id == dataset_id)
+            .order_by(classes_table.c.class_index)
+        )
+        return self.db.execute(query).fetchall()

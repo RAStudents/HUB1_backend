@@ -23,6 +23,9 @@ Base = declarative_base()
 def init_db() -> None:
     """Создаёт все таблицы в базе данных (если они ещё не существуют)."""
     metadata.create_all(bind=engine)
+    for table in metadata.tables.values():
+        for index in table.indexes:
+            index.create(bind=engine, checkfirst=True)
 
 
 def get_db():

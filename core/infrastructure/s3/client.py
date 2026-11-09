@@ -4,6 +4,7 @@ import os
 import shutil
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 
 logger = logging.getLogger(__name__)
@@ -76,11 +77,14 @@ class S3Client:
         elif target.exists():
             target.unlink()
 
-    def get_presigned_url(self,
-                          key: str,
-                          expires_in: int = 3600) -> str:
+    def get_presigned_url(
+        self,
+        key: str,
+        expires_in: int = 3600,
+        base_url: str = "http://localhost:8000",
+    ) -> str:
         """Возвращает локальный URL (аналог presigned URL в S3)."""
-        return f"http://localhost:8000/storage/{self.bucket}/{key}"
+        return f"{base_url.rstrip('/')}/storage/{self.bucket}/{quote(key, safe='/')}"
 
     def get_presigned_upload_url(self,
                                  key: str,

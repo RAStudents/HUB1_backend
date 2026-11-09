@@ -1,15 +1,17 @@
 # apps/api/app/api/samples.py
-
 import logging
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 from acmenra_cv import TaskType
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from apps.api.app.deps import (
     CurrentUser,
     get_current_user,
+    get_annotation_repo,
+    get_class_repo,
     get_dataset_or_404,
     get_import_service,
     get_s3_client,
@@ -17,14 +19,16 @@ from apps.api.app.deps import (
     require_dataset_role,
 )
 from apps.api.app.schemas.sample import (
+    GalleryClassDTO,
     CompleteUploadRequest,
     GalleryPageDTO,
     SampleCardDTO,
     UploadUrlRequest,
     UploadUrlResponse,
 )
-
 from core.infrastructure.s3.client import S3Client
+from core.infrastructure.cv.labels import parse_label_file
+from core.infrastructure.cv.mapper import instances_to_dtos
 from core.application.import_service import ImportService
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
@@ -39,46 +43,143 @@ router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["samples"])
 
 
 @router.get("", response_model=GalleryPageDTO)
-def list_gallery_samples(dataset_id: int,
-                         split: Optional[str] = Query(None, description="train | val | test | None (все)"),
-                         sample_status: Optional[str] = Query(None, alias="status"),
-                         page: int = Query(1, ge=1),
-                         page_size: int = Query(24, ge=1, le=100),
-                         user: CurrentUser = Depends(get_current_user),
-                         dataset=Depends(get_dataset_or_404),
-                         s3: S3Client = Depends(get_s3_client),
-                         sample_repo=Depends(get_sample_repo)) -> GalleryPageDTO:
-    """
-    Галерея кадров с фильтрацией по сплиту и статусу.
-    Генерирует presigned URL на оригинал и превью (тумбу с масками) для каждой карточки.
-    """
+def list_gallery_samples(
+    request: Request,
+    dataset_id: int,
+    split: Optional[str] = Query(None, description="train | val | test | None (все)"),
+    sample_status: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None, max_length=255),
+    labeled: Optional[bool] = Query(None),
+    object_count: Optional[str] = Query(None, pattern="^(none|one|multiple)$"),
+    class_ids: list[int] | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, ge=1, le=100),
+    user: CurrentUser = Depends(get_current_user),
+    dataset=Depends(get_dataset_or_404),
+    s3: S3Client = Depends(get_s3_client),
+    sample_repo=Depends(get_sample_repo),
+    annotation_repo=Depends(get_annotation_repo),
+    class_repo=Depends(get_class_repo),
+) -> GalleryPageDTO:
+    """Возвращает только одну страницу карточек и геометрию разметки."""
     normalized_split = split.lower() if split and split.lower() != "all" else None
+    class_names = class_repo.get_names(dataset_id)
+    task = TaskType(dataset.task)
+    missing_geometry_rows = sample_repo.list_missing_geometries(dataset_id)
+    for index, sample in enumerate(missing_geometry_rows, start=1):
+        raw_label = s3.get_bytes(sample.label_key)
+        instances = []
+        if raw_label:
+            with scratch_file(suffix=".txt", data=raw_label) as label_path:
+                instances = parse_label_file(
+                    path=label_path,
+                    class_names=class_names,
+                    task=task,
+                )
+            annotation_repo.replace_sample_annotations(
+                sample_id=sample.id,
+                class_ids=[instance.class_id for instance in instances],
+                user_id=None,
+                commit=False,
+            )
+        annotations = [
+            item.model_dump(mode="json")
+            for item in instances_to_dtos(instances, task)
+        ]
+        sample_repo.set_geometries(sample.id, annotations, commit=False)
+        if index % 100 == 0:
+            sample_repo.commit()
+    if missing_geometry_rows:
+        sample_repo.commit()
 
-    total, rows = sample_repo.paginate(
+    total, rows = sample_repo.paginate_gallery(
         dataset_id=dataset_id,
         split=normalized_split,
         status=sample_status,
+        labeled=labeled,
+        search=search.strip() if search else None,
+        object_count=object_count,
+        class_ids=class_ids or [],
         offset=(page - 1) * page_size,
         limit=page_size,
     )
 
-    items = [
-        SampleCardDTO(
+    items = []
+    for row in rows:
+        annotations = sample_repo.get_geometries(row.geometry_json)
+        if not row.geometry_json:
+            raw_label = s3.get_bytes(row.label_key)
+            if raw_label:
+                with scratch_file(suffix=".txt", data=raw_label) as label_path:
+                    instances = parse_label_file(
+                        path=label_path,
+                        class_names=class_names,
+                        task=task,
+                    )
+                annotations = [
+                    item.model_dump(mode="json")
+                    for item in instances_to_dtos(instances, task)
+                ]
+                sample_repo.set_geometries(row.id, annotations)
+                annotation_repo.replace_sample_annotations(
+                    sample_id=row.id,
+                    class_ids=[instance.class_id for instance in instances],
+                    user_id=None,
+                )
+
+        per_class_counts = Counter(
+            item["class_id"] for item in annotations
+        )
+        class_catalog = [
+            GalleryClassDTO(
+                id=class_id,
+                name=class_names[class_id] if 0 <= class_id < len(class_names) else f"Класс {class_id}",
+                count=count,
+            )
+            for class_id, count in sorted(per_class_counts.items())
+        ]
+        items.append(SampleCardDTO(
             id=row.id,
+            sample_id=row.id,
             dataset_id=dataset_id,
             stem=row.stem,
             split=row.split,
             status=row.status,
             is_labeled=row.is_labeled,
-            image_url=s3.get_presigned_url(row.image_key),
-            thumb_url=s3.get_presigned_url(row.thumb_key),
+            image_url=s3.get_presigned_url(
+                row.image_key,
+                base_url=str(request.base_url).rstrip("/"),
+            ),
+            thumb_url=s3.get_presigned_url(
+                row.thumb_key,
+                base_url=str(request.base_url).rstrip("/"),
+            ),
+            filename=Path(row.image_key).name,
+            task=dataset.task,
+            objects_count=len(annotations),
+            annotation_classes=class_catalog,
+            annotations=annotations,
             lock_user=row.lock_user,
             lock_until=row.lock_until,
             parse_error=row.parse_error,
-        )
-        for row in rows
+        ))
+
+    stats = sample_repo.get_gallery_stats(dataset_id, normalized_split)
+    class_counts = sample_repo.get_class_counts(dataset_id)
+    classes = [
+        GalleryClassDTO(id=index, name=name, count=class_counts.get(index, 0))
+        for index, name in enumerate(class_names)
     ]
-    return GalleryPageDTO(total=total, page=page, page_size=page_size, items=items)
+    return GalleryPageDTO(
+        total=total,
+        page=page,
+        page_size=page_size,
+        task=dataset.task,
+        labeled_count=stats["labeled"],
+        unlabeled_count=stats["unlabeled"],
+        classes=classes,
+        items=items,
+    )
 
 
 @router.post("/import-zip")
@@ -111,12 +212,15 @@ def get_upload_url(dataset_id: int,
 
 
 @router.post("/complete-upload", response_model=SampleCardDTO)
-def complete_upload(dataset_id: int,
-                    req: CompleteUploadRequest,
-                    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-                    dataset=Depends(get_dataset_or_404),
-                    s3: S3Client = Depends(get_s3_client),
-                    sample_repo=Depends(get_sample_repo)) -> SampleCardDTO:
+def complete_upload(
+    request: Request,
+    dataset_id: int,
+    req: CompleteUploadRequest,
+    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+    dataset=Depends(get_dataset_or_404),
+    s3: S3Client = Depends(get_s3_client),
+    sample_repo=Depends(get_sample_repo),
+) -> SampleCardDTO:
     """
     Завершает загрузку одиночного кадра:
     конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.
@@ -158,6 +262,7 @@ def complete_upload(dataset_id: int,
         is_labeled=False,
         parse_error=None,
     )
+    sample_repo.set_geometries(sample_id=row.id, geometries=[])
 
     return SampleCardDTO(
         id=row.id,
@@ -166,8 +271,14 @@ def complete_upload(dataset_id: int,
         split=row.split,
         status=row.status,
         is_labeled=row.is_labeled,
-        image_url=s3.get_presigned_url(s3_img_key),
-        thumb_url=s3.get_presigned_url(s3_thb_key),
+        image_url=s3.get_presigned_url(
+            s3_img_key,
+            base_url=str(request.base_url).rstrip("/"),
+        ),
+        thumb_url=s3.get_presigned_url(
+            s3_thb_key,
+            base_url=str(request.base_url).rstrip("/"),
+        ),
     )
 
 

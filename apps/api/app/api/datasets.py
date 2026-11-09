@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from acmenra_cv import TaskType
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
 from apps.api.app.deps import (
     CurrentUser,
@@ -205,16 +205,21 @@ def upload_and_save_dataset(request: Request,
 
 
 @router.get("/{dataset_id}/gallery")
-def get_dataset_gallery(dataset_id: int,
-                        request: Request,
-                        yaml_path: Optional[str] = Query(None),
-                        split: str = Query("train"),
-                        limit: int = Query(50, ge=1, le=500),
-                        offset: int = Query(0, ge=0),
-                        class_ids: list[int] | None = Query(None),
-                        dataset=Depends(get_dataset_or_404),
-                        sample_repo=Depends(get_sample_repo)):
+def get_dataset_gallery(
+    dataset_id: int,
+    request: Request,
+    response: Response,
+    yaml_path: Optional[str] = Query(None),
+    split: str = Query("train"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    class_ids: list[int] | None = Query(None),
+    filenames: list[str] | None = Query(None),
+    dataset=Depends(get_dataset_or_404),
+    sample_repo=Depends(get_sample_repo),
+):
     base_url = str(request.base_url).rstrip("/")
+    response.headers["X-Total-Count"] = "0"
     persistent_dir = STORAGE_DIR / f"dataset_{dataset_id}"
     raw_dir = persistent_dir / "raw"
 
@@ -238,8 +243,9 @@ def get_dataset_gallery(dataset_id: int,
 
         selected_class_ids = set(class_ids) if class_ids else None
         items = []
+        total_count = 0
         for split_name in split_names:
-            split_items = build_dataset_gallery(
+            split_items, split_total = build_dataset_gallery(
                 dataset_id=dataset_id,
                 yaml_path=resolved_yaml,
                 split_name=split_name,
@@ -248,18 +254,22 @@ def get_dataset_gallery(dataset_id: int,
                 base_url=base_url,
                 class_ids=selected_class_ids,
                 fallback_task=TaskType(dataset.task),
+                filenames=set(filenames) if filenames is not None else None,
             )
+            total_count += split_total
             sample_splits = (
                 ("val", "valid")
                 if split_name == "val"
                 else (split_name,)
             )
+            sample_stems = [Path(item["filename"]).stem for item in split_items]
             samples_by_stem = {
                 sample.stem: sample
                 for sample_split in sample_splits
-                for sample in sample_repo.list_for_split(
+                for sample in sample_repo.list_by_stems(
                     dataset_id=dataset_id,
                     split=sample_split,
+                    stems=sample_stems,
                 )
             }
             for item in split_items:
@@ -273,6 +283,7 @@ def get_dataset_gallery(dataset_id: int,
                         is_labeled=sample.is_labeled,
                     )
             items.extend(split_items)
+        response.headers["X-Total-Count"] = str(total_count)
         return items[:limit] if normalized_split != "all" else items
     except Exception as exc:
         traceback.print_exc()

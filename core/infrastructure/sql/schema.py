@@ -2,7 +2,7 @@
 
 import logging
 from sqlalchemy import (
-    MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+    Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.sql import func
 
@@ -72,6 +72,30 @@ samples_table = Table(
     Column("parse_error", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
+Index(
+    "ix_samples_gallery_dataset_split_id",
+    samples_table.c.dataset_id,
+    samples_table.c.split,
+    samples_table.c.id,
+)
+Index(
+    "ix_samples_gallery_dataset_status_id",
+    samples_table.c.dataset_id,
+    samples_table.c.status,
+    samples_table.c.id,
+)
+
+sample_geometries_table = Table(
+    "sample_geometries",
+    metadata,
+    Column(
+        "sample_id",
+        Integer,
+        ForeignKey("samples.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("geometry_json", Text, nullable=False),
+)
 
 annotations_table = Table(
     "annotations",
@@ -81,6 +105,16 @@ annotations_table = Table(
     Column("class_id", Integer, nullable=False),
     Column("created_by", Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     Column("updated_by", Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+)
+Index(
+    "ix_annotations_sample_class",
+    annotations_table.c.sample_id,
+    annotations_table.c.class_id,
+)
+Index(
+    "ix_annotations_class_sample",
+    annotations_table.c.class_id,
+    annotations_table.c.sample_id,
 )
 
 events_table = Table(
