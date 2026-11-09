@@ -1,7 +1,7 @@
 # apps/api/app/schemas/export.py
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -17,3 +17,14 @@ class ExportStatusDTO(BaseModel):
     progress: int = 0
     download_url: Optional[str] = None
     error: Optional[str] = None
+
+
+class ExportRequestDTO(BaseModel):
+    class_ids: list[int] | None = None
+    splits: list[Literal["train", "val", "test"]] | None = None
+
+
+class ExportClassDTO(BaseModel):
+    id: int
+    name: str
+    count: int = 0

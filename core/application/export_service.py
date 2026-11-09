@@ -7,7 +7,14 @@ import logging
 from typing import Any
 from pathlib import Path
 from acmenra_cv import TaskType
-from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
+from acmenra_ds import (
+    Config,
+    Dataset,
+    DatasetLayout,
+    LabelParser,
+    LabelWriter,
+    make_category_enum,
+)
 
 from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
@@ -35,7 +42,9 @@ class ExportService:
                          user_id: int,
                          task: TaskType,
                          export_id: int | None = None,
-                         accepted_samples: list | None = None) -> dict:
+                         accepted_samples: list | None = None,
+                         selected_class_ids: list[int] | None = None,
+                         selected_splits: list[str] | None = None) -> dict:
         """
         Собирает архив датасета только из сэмплов со статусом 'accepted',
         проверяет его через acmenra-ds, сохраняет в прямой раскладке, загружает ZIP
@@ -54,6 +63,24 @@ class ExportService:
             accepted_samples = self.samples.list_by_status(
                 dataset_id=dataset_id, status="accepted"
             )
+        if selected_splits is not None:
+            normalized_splits = {
+                "val" if split.lower() == "valid" else split.lower()
+                for split in selected_splits
+            }
+            if not normalized_splits:
+                raise ValueError("Выберите хотя бы один сплит для экспорта")
+            invalid_splits = normalized_splits - {"train", "val", "test"}
+            if invalid_splits:
+                raise ValueError(
+                    f"Неизвестные сплиты: {sorted(invalid_splits)}"
+                )
+            accepted_samples = [
+                sample
+                for sample in accepted_samples
+                if ("val" if (sample.split or "train").lower() == "valid"
+                    else (sample.split or "train").lower()) in normalized_splits
+            ]
         if export_id is None:
             export_record = self.exports.create_export(
                 dataset_id=dataset_id,
@@ -64,6 +91,32 @@ class ExportService:
 
         try:
             class_names = self.classes.get_names(dataset_id=dataset_id)
+            all_class_ids = set(range(len(class_names)))
+            if selected_class_ids is not None:
+                selected_ids = set(selected_class_ids)
+                if not selected_ids:
+                    raise ValueError("Выберите хотя бы один класс для экспорта")
+                invalid_ids = selected_ids - all_class_ids
+                if invalid_ids:
+                    raise ValueError(
+                        f"Неизвестные ID классов: {sorted(invalid_ids)}"
+                    )
+            else:
+                selected_ids = all_class_ids
+
+            filter_labels = selected_ids != all_class_ids
+            if filter_labels:
+                category = make_category_enum(class_names)
+                label_parser = LabelParser(
+                    nc=max(len(class_names), 1),
+                    task_type=task,
+                    category=category,
+                )
+                label_writer = LabelWriter(
+                    nc=max(len(class_names), 1),
+                    task_type=task,
+                    category=category,
+                )
 
             with scratch_dir(prefix=f"export_ds_{dataset_id}_") as tmp_dir:
                 ds_root = tmp_dir / "dataset"
@@ -142,6 +195,27 @@ class ExportService:
                     (img_dir / f"{sample.stem}{image_ext}").write_bytes(normalized_bytes)
 
                     lbl_bytes = self.s3.get_bytes(s3_lbl_key) or b""
+                    if filter_labels and lbl_bytes:
+                        with scratch_file(suffix=".txt", data=lbl_bytes) as label_path:
+                            instances = label_parser.parse(
+                                path=label_path,
+                                is_strict=True,
+                            ) or []
+                        selected_instances = [
+                            instance
+                            for instance in instances
+                            if instance.class_id in selected_ids
+                        ]
+                        if selected_instances:
+                            with scratch_file(suffix=".txt") as filtered_label_path:
+                                label_writer.write(
+                                    path=filtered_label_path,
+                                    instances=selected_instances,
+                                    is_strict=True,
+                                )
+                                lbl_bytes = filtered_label_path.read_bytes()
+                        else:
+                            lbl_bytes = b""
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
                     exported_samples += 1
                     populated_splits.add(split_name)
