@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any, List
 from acmenra_cv import TaskType
 
-from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit
+from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit, make_category_enum
 
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.cv.labels import build_category_enum, parse_label_file
+from core.infrastructure.cv.labels import parse_label_file
 
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
@@ -103,7 +103,7 @@ def build_acmenra_dataset(root: Path,
     if not names:
         names = ["object"]
 
-    category_enum = build_category_enum(names)
+    category_enum = make_category_enum(names)
     layout = detect_layout(root)
     val_leaf = (
         "valid"

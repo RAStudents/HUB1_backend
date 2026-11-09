@@ -5,6 +5,8 @@ import logging
 from typing import List, Sequence
 
 from acmenra_cv import Box, Instance, Obb, Point, Polygon, TaskType
+from acmenra_ds import make_category_enum
+
 from apps.api.app.schemas.annotation import (
     AnnotationItemDTO,
     BoxDTO,
@@ -12,7 +14,6 @@ from apps.api.app.schemas.annotation import (
     PointDTO,
     PolygonDTO,
 )
-from core.infrastructure.cv.labels import build_category_enum
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def dto_to_instance(dto: AnnotationItemDTO,
     - Для OBB и SEGMENT создаёт технический пустой Box() (требование конструктора Instance).
     - Угол OBB переводится из градусов в радианы.
     """
-    category_enum = build_category_enum(class_names)
+    category_enum = make_category_enum(class_names)
     members_by_val = {item.value: item for item in category_enum}
     label_enum = members_by_val.get(dto.class_id, list(category_enum)[0])
     placeholder_box = Box()

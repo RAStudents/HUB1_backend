@@ -11,9 +11,8 @@ from typing import Any, Dict, List
 from urllib.parse import quote
 
 from acmenra_cv import TaskType
-from acmenra_ds import Config, Dataset, DatasetLayout
+from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
 
-from core.infrastructure.cv.labels import build_category_enum
 from core.infrastructure.cv.thumbs import render_thumbnail_array
 
 
@@ -131,7 +130,7 @@ def load_acmenra_dataset(yaml_or_dir_path: Path,
     if not names:
         names = ["object"]
 
-    category_enum = build_category_enum(names)
+    category_enum = make_category_enum(names)
     
     # Строгое чтение task из конфига, без дефолтов и попыток угадывания
     task_str = raw_cfg.get("task")
