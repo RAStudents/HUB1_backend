@@ -20,6 +20,17 @@ class SampleRepository:
     def __init__(self, db_conn):
         self.db = db_conn
 
+    def count_by_dataset_ids(self, dataset_ids: list[int]) -> dict[int, int]:
+        if not dataset_ids:
+            return {}
+
+        rows = self.db.execute(
+            select(samples_table.c.dataset_id, func.count(samples_table.c.id))
+            .where(samples_table.c.dataset_id.in_(dataset_ids))
+            .group_by(samples_table.c.dataset_id)
+        ).all()
+        return {dataset_id: count for dataset_id, count in rows}
+
     def create_sample(self,
                       dataset_id: int,
                       stem: str,

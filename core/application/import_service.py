@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any, List
 from acmenra_cv import TaskType
 
-from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit, make_category_enum
+from acmenra_ds import Config, DatasetLayout, DataSplit
+from acmenra_ds.data.sample import Sample
 
 from core.infrastructure.cv.labels import parse_label_file
 from core.infrastructure.cv.mapper import instances_to_dtos
-from core.infrastructure.cv.thumbs import render_thumbnail_bytes
+from core.infrastructure.cv.thumbs import read_image_unicode, render_thumbnail_bytes
 
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
@@ -80,7 +81,7 @@ def normalize_dataset_images(root: Path) -> None:
 
 def build_acmenra_dataset(root: Path,
                           task: TaskType,
-                          fallback_names: List[str] | None = None) -> Dataset:
+                          fallback_names: List[str] | None = None) -> Config:
     root = resolve_dataset_root(root)
     yaml_path = find_yaml_file(root)
 
@@ -104,7 +105,6 @@ def build_acmenra_dataset(root: Path,
     if not names:
         names = ["object"]
 
-    category_enum = make_category_enum(names)
     layout = detect_layout(root)
     val_leaf = (
         "valid"
@@ -132,10 +132,42 @@ def build_acmenra_dataset(root: Path,
         val_leaf=val_leaf,
     )
 
-    return Dataset(config=config,
-                   category=category_enum,
-                   is_cache=False,
-                   is_strict=False)
+    return config
+
+
+def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
+    if split == DataSplit.TRAIN:
+        image_dir = config.get_train_images()
+        label_dir = config.get_train_labels()
+    elif split == DataSplit.VAL:
+        image_dir = config.get_val_images()
+        label_dir = config.get_val_labels()
+    else:
+        image_dir = config.get_test_images()
+        label_dir = config.get_test_labels()
+
+    if image_dir is None or not image_dir.is_dir():
+        return []
+
+    samples = []
+    for image_path in sorted(image_dir.iterdir()):
+        if not image_path.is_file() or image_path.suffix.lower() not in {
+            ".jpg", ".jpeg", ".png",
+        }:
+            continue
+
+        frame = read_image_unicode(image_path)
+        if frame is None or min(frame.shape[:2]) <= 1:
+            continue
+
+        label_path = label_dir / f"{image_path.stem}.txt" if label_dir else None
+        samples.append(Sample(
+            stem=image_path.stem,
+            image_path=image_path,
+            label_path=label_path if label_path and label_path.is_file() else None,
+        ))
+
+    return samples
 
 
 class ImportService:
@@ -170,24 +202,20 @@ class ImportService:
             persistent_raw_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(root, persistent_raw_dir, dirs_exist_ok=True)
 
-            ds = build_acmenra_dataset(root=persistent_raw_dir, task=task, fallback_names=existing_classes)
-            class_names = ds.names or existing_classes or []
+            config = build_acmenra_dataset(
+                root=persistent_raw_dir,
+                task=task,
+                fallback_names=existing_classes,
+            )
+            class_names = config.names or existing_classes or []
 
             if class_names and self.classes is not None:
                 self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
 
             for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST):
-                try:
-                    split_obj = ds.split(split_enum)
-                except Exception:
-                    continue
-
-                if split_obj is None:
-                    continue
-
                 split_name = split_enum.value.lower()
 
-                for idx, sample in enumerate(split_obj.samples):
+                for idx, sample in enumerate(load_split_samples(config, split_enum)):
                     parse_error: str | None = None
                     instances = []
 

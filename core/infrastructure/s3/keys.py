@@ -32,3 +32,8 @@ def export_zip_key(dataset_id: int,
                    export_id: int) -> str:
     """Ключ готового архива экспорта датасета."""
     return f"datasets/{dataset_id}/exports/{export_id}.zip"
+
+
+def user_avatar_key(user_id: int) -> str:
+    """Ключ аватара пользователя в хранилище."""
+    return f"avatars/{user_id}.webp"

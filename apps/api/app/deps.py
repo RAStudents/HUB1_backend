@@ -145,11 +145,13 @@ def get_auth_service(user_repo=Depends(get_user_repo)) -> AuthService:
 
 def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
                         class_repo=Depends(get_class_repo),
-                        membership_repo=Depends(get_membership_repo),) -> DatasetService:
+                        membership_repo=Depends(get_membership_repo),
+                        sample_repo=Depends(get_sample_repo)) -> DatasetService:
     return DatasetService(
         dataset_repo=dataset_repo,
         class_repo=class_repo,
         membership_repo=membership_repo,
+        sample_repo=sample_repo,
     )
 
 
