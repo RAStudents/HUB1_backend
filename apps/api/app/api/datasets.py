@@ -2,35 +2,36 @@
 
 import shutil
 import logging
+import os
+import tempfile
 import traceback
 from pathlib import Path
 from typing import Optional
 from acmenra_cv import TaskType
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
 from apps.api.app.deps import (
     CurrentUser,
     get_current_user,
     get_dataset_or_404,
     get_dataset_service,
-    get_import_service,
+    get_import_job_repo,
     get_sample_repo,
     get_s3_client,
     require_dataset_role,
 )
 from core.application.dataset_service import DatasetService
-from core.application.import_service import ImportService, resolve_dataset_root
 from core.application.visualizer import (
     STORAGE_DIR,
     build_dataset_gallery,
     find_dataset_gallery_image,
-    load_acmenra_dataset,
     resolve_yaml_path,
 )
 
 from core.infrastructure.s3.client import S3Client
-from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
+from apps.api.app.import_tasks import run_new_dataset_import
+from apps.api.app.schemas.import_job import ImportJobDTO
 
 
 
@@ -129,79 +130,89 @@ def delete_gallery_item(dataset_id: int,
         sample_repo.delete(sample_id=sample.id)
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
-def upload_and_save_dataset(request: Request,
+@router.post("/upload", response_model=ImportJobDTO, status_code=status.HTTP_202_ACCEPTED)
+async def upload_and_save_dataset(request: Request,
+                            background_tasks: BackgroundTasks,
                             name: str = Form(...),
                             task: str = Form(...),
                             is_private: bool = Form(True),
                             file: UploadFile = File(...),
                             user: CurrentUser = Depends(get_current_user),
-                            service: DatasetService = Depends(get_dataset_service),
-                            import_service: ImportService = Depends(get_import_service),
-                            s3: S3Client = Depends(get_s3_client)):
+                            import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
     if not file.filename or Path(file.filename).suffix.lower() != ".zip":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Загрузите ZIP-архив со всем датасетом",
         )
 
-    dataset_id: int | None = None
     try:
-        content = file.file.read()
-        with scratch_dir(prefix="upload_dataset_") as tmp_dir:
-            extracted_root = extract_zip_safely(content, tmp_dir)
-            real_root = resolve_dataset_root(extracted_root)
-            selected_task = TaskType(task)
-            ds = load_acmenra_dataset(real_root, fallback_task=selected_task)
-            if ds.task.value != selected_task.value:
-                raise ValueError(
-                    f"Выбранный тип задачи '{task}' не совпадает с task в data.yaml ('{ds.task.value}')"
-                )
+        selected_task = TaskType(task)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный тип задачи: {task}",
+        ) from exc
 
-            dataset_id = service.create_dataset(
-                name=name,
-                task=ds.task,
-                owner_id=user.id,
-                is_private=is_private,
-                initial_classes=ds.names,
-            )
-
-            import_result = import_service.import_zip(
-                dataset_id=dataset_id,
-                task=ds.task,
-                zip_source=content,
-                existing_classes=ds.names,
-            )
-
-            persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
-            resolved_yaml = resolve_yaml_path(persistent_raw_dir)
-            base_url = str(request.base_url).rstrip("/")
-            build_dataset_gallery(
-                dataset_id=dataset_id,
-                yaml_path=resolved_yaml,
-                split_name="train",
-                limit=50,
-                base_url=base_url,
-                fallback_task=ds.task,
-            )
-
-            return {
-                "dataset_id": dataset_id,
-                "name": name,
-                "task": str(ds.task),
-                "classes": ds.names,
-                "imported_samples": import_result["imported_samples"],
-                "parse_errors": import_result["parse_errors"],
-            }
-    except HTTPException:
+    content = await file.read()
+    file_descriptor, zip_path = tempfile.mkstemp(prefix="hub_dataset_import_", suffix=".zip")
+    try:
+        with os.fdopen(file_descriptor, "wb") as saved_file:
+            saved_file.write(content)
+        import_record = import_job_repo.create(user_id=user.id)
+        background_tasks.add_task(
+            run_new_dataset_import,
+            import_id=import_record.id,
+            zip_path=zip_path,
+            user_id=user.id,
+            name=name,
+            task=selected_task.value,
+            is_private=is_private,
+            base_url=str(request.base_url).rstrip("/"),
+        )
+    except Exception:
+        Path(zip_path).unlink(missing_ok=True)
         raise
-    except Exception as exc:
-        if dataset_id is not None:
-            s3.delete_prefix(f"datasets/{dataset_id}/")
-            service.delete_dataset(dataset_id=dataset_id)
-            shutil.rmtree(STORAGE_DIR / f"dataset_{dataset_id}", ignore_errors=True)
-        traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    return ImportJobDTO(
+        import_id=import_record.id,
+        dataset_id=import_record.dataset_id,
+        status=import_record.status,
+        stage=import_record.stage,
+        progress=import_record.progress,
+        total_samples=import_record.total_samples,
+        processed_samples=import_record.processed_samples,
+        imported_samples=import_record.imported_samples,
+        parse_errors=import_record.parse_errors,
+        error=import_record.error,
+        created_at=import_record.created_at,
+    )
+
+
+@router.get("/imports/{import_id}", response_model=ImportJobDTO)
+def get_import_status(
+    import_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    import_job_repo=Depends(get_import_job_repo),
+) -> ImportJobDTO:
+    record = import_job_repo.get_by_id(import_id)
+    if record is None or record.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Задание импорта не найдено",
+        )
+    return ImportJobDTO(
+        import_id=record.id,
+        dataset_id=record.dataset_id,
+        status=record.status,
+        stage=record.stage,
+        progress=record.progress,
+        total_samples=record.total_samples,
+        processed_samples=record.processed_samples,
+        imported_samples=record.imported_samples,
+        parse_errors=record.parse_errors,
+        error=record.error,
+        created_at=record.created_at,
+    )
 
 
 @router.get("/{dataset_id}/gallery")

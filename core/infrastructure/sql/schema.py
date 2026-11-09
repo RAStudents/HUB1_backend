@@ -142,3 +142,20 @@ exports_table = Table(
     Column("error", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
+
+import_jobs_table = Table(
+    "import_jobs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("dataset_id", Integer, nullable=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String(50), server_default="queued", nullable=False),
+    Column("stage", String(50), server_default="queued", nullable=False),
+    Column("progress", Integer, default=0, nullable=False),
+    Column("total_samples", Integer, default=0, nullable=False),
+    Column("processed_samples", Integer, default=0, nullable=False),
+    Column("imported_samples", Integer, default=0, nullable=False),
+    Column("parse_errors", Integer, default=0, nullable=False),
+    Column("error", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)

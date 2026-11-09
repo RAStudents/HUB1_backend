@@ -78,6 +78,10 @@ def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
 
+def get_import_job_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.import_jobs import ImportJobRepository
+    return ImportJobRepository(db)
+
 def get_event_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.events import EventRepository
     return EventRepository(db)

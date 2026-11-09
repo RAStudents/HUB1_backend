@@ -1,11 +1,13 @@
 # apps/api/app/api/samples.py
 import logging
+import os
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Optional
 from acmenra_cv import TaskType
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
 from apps.api.app.deps import (
     CurrentUser,
@@ -13,7 +15,7 @@ from apps.api.app.deps import (
     get_annotation_repo,
     get_class_repo,
     get_dataset_or_404,
-    get_import_service,
+    get_import_job_repo,
     get_s3_client,
     get_sample_repo,
     require_dataset_role,
@@ -26,10 +28,11 @@ from apps.api.app.schemas.sample import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
+from apps.api.app.schemas.import_job import ImportJobDTO
+from apps.api.app.import_tasks import run_existing_dataset_import
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.cv.labels import parse_label_file
 from core.infrastructure.cv.mapper import instances_to_dtos
-from core.application.import_service import ImportService
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.convert import normalize_image_file
@@ -182,22 +185,50 @@ def list_gallery_samples(
     )
 
 
-@router.post("/import-zip")
+@router.post("/import-zip", response_model=ImportJobDTO, status_code=status.HTTP_202_ACCEPTED)
 async def import_dataset_zip(dataset_id: int,
+                             background_tasks: BackgroundTasks,
                              file: UploadFile = File(...),
                              user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
                              dataset=Depends(get_dataset_or_404),
-                             import_service: ImportService = Depends(get_import_service)) -> dict:
+                             import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
     """Принимает ZIP с датасетом, проходит по train/val/test и строит все превью с масками."""
-    zip_bytes = await file.read()
-    try:
-        return import_service.import_zip(
-            dataset_id=dataset_id,
-            task=TaskType(dataset.task),
-            zip_source=zip_bytes,
+    if not file.filename or Path(file.filename).suffix.lower() != ".zip":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Загрузите ZIP-архив с датасетом",
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    zip_bytes = await file.read()
+    file_descriptor, zip_path = tempfile.mkstemp(prefix="hub_import_", suffix=".zip")
+    try:
+        with os.fdopen(file_descriptor, "wb") as saved_file:
+            saved_file.write(zip_bytes)
+        import_record = import_job_repo.create(user_id=user.id, dataset_id=dataset_id)
+        background_tasks.add_task(
+            run_existing_dataset_import,
+            import_id=import_record.id,
+            zip_path=zip_path,
+            dataset_id=dataset_id,
+            task=dataset.task,
+        )
+    except Exception:
+        Path(zip_path).unlink(missing_ok=True)
+        raise
+
+    return ImportJobDTO(
+        import_id=import_record.id,
+        dataset_id=dataset_id,
+        status=import_record.status,
+        stage=import_record.stage,
+        progress=import_record.progress,
+        total_samples=import_record.total_samples,
+        processed_samples=import_record.processed_samples,
+        imported_samples=import_record.imported_samples,
+        parse_errors=import_record.parse_errors,
+        error=import_record.error,
+        created_at=import_record.created_at,
+    )
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
