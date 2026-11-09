@@ -135,7 +135,9 @@ exports_table = Table(
     Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     Column("status", String(50), server_default="processing", nullable=False),  # processing / completed / failed
+    Column("stage", String(50), server_default="processing", nullable=False),
     Column("exported_samples", Integer, default=0, nullable=False),
+    Column("total_samples", Integer, default=0, nullable=False),
     Column("s3_key", Text, nullable=True),
     Column("error", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),

@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 class ExportStatusDTO(BaseModel):
     export_id: int
     status: str
+    stage: str = "processing"
     exported_samples: int = 0
+    total_samples: int = 0
+    progress: int = 0
     download_url: Optional[str] = None
     error: Optional[str] = None

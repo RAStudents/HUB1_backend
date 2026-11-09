@@ -7,7 +7,7 @@ import logging
 from typing import Any
 from pathlib import Path
 from acmenra_cv import TaskType
-from acmenra_ds import Config, Dataset, DatasetLayout
+from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
 
 from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
@@ -33,7 +33,9 @@ class ExportService:
     def build_export_zip(self,
                          dataset_id: int,
                          user_id: int,
-                         task: TaskType) -> dict:
+                         task: TaskType,
+                         export_id: int | None = None,
+                         accepted_samples: list | None = None) -> dict:
         """
         Собирает архив датасета только из сэмплов со статусом 'accepted',
         проверяет его через acmenra-ds, сохраняет в прямой раскладке, загружает ZIP
@@ -41,15 +43,26 @@ class ExportService:
         """
         role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
         if role is None:
+            if export_id is not None:
+                self.exports.mark_failed(
+                    export_id=export_id,
+                    error="Доступ к датасету запрещён",
+                )
             raise PermissionError("Доступ к датасету запрещён")
 
-        export_record = self.exports.create_export(dataset_id=dataset_id, user_id=user_id)
-        export_id = export_record.id
-
-        try:
+        if accepted_samples is None:
             accepted_samples = self.samples.list_by_status(
                 dataset_id=dataset_id, status="accepted"
             )
+        if export_id is None:
+            export_record = self.exports.create_export(
+                dataset_id=dataset_id,
+                user_id=user_id,
+                total_samples=len(accepted_samples),
+            )
+            export_id = export_record.id
+
+        try:
             class_names = self.classes.get_names(dataset_id=dataset_id)
 
             with scratch_dir(prefix=f"export_ds_{dataset_id}_") as tmp_dir:
@@ -79,6 +92,7 @@ class ExportService:
                 exported_samples = 0
                 exported_stems: set[tuple[str, str]] = set()
                 populated_splits: set[str] = set()
+                progress_interval = max(1, (len(accepted_samples) + 99) // 100)
                 for sample in accepted_samples:
                     split_name = (sample.split or "train").lower()
                     if split_name not in split_dirs:
@@ -131,8 +145,23 @@ class ExportService:
                     (lbl_dir / f"{sample.stem}.txt").write_bytes(lbl_bytes)
                     exported_samples += 1
                     populated_splits.add(split_name)
+                    if (
+                        exported_samples % progress_interval == 0
+                        or exported_samples == len(accepted_samples)
+                    ):
+                        self.exports.update_progress(
+                            export_id=export_id,
+                            exported_samples=exported_samples,
+                            stage="processing",
+                        )
 
-                dataset = Dataset(config=config, is_cache=False, is_strict=True)
+                self.exports.update_stage(export_id=export_id, stage="validating")
+                dataset = Dataset(
+                    config=config,
+                    category=make_category_enum(class_names, allow_empty=True),
+                    is_cache=False,
+                    is_strict=True,
+                )
                 health = dataset.health()
                 if not health["is_healthy"]:
                     raise ValueError(
@@ -148,6 +177,7 @@ class ExportService:
                     if split_name not in populated_splits:
                         shutil.rmtree(ds_root / split_name)
 
+                self.exports.update_stage(export_id=export_id, stage="packaging")
                 yaml_data = self._build_yaml_dict(
                     class_names=class_names,
                     task=task,
@@ -168,14 +198,17 @@ class ExportService:
                             zf.write(file_path, arcname=arcname)
 
                 s3_zip = export_zip_key(dataset_id=dataset_id, export_id=export_id)
+                self.exports.update_stage(export_id=export_id, stage="uploading")
                 self.s3.put_bytes(
                     s3_zip, zip_path.read_bytes(), content_type="application/zip"
                 )
+                self.exports.update_stage(export_id=export_id, stage="finalizing")
 
             self.exports.mark_completed(
                 export_id=export_id,
                 s3_key=s3_zip,
                 exported_samples=exported_samples,
+                total_samples=len(accepted_samples),
             )
             download_url = self.s3.get_presigned_url(s3_zip)
 

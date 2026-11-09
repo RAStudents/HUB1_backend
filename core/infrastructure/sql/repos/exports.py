@@ -14,13 +14,16 @@ class ExportRepository:
 
     def create_export(self,
                       dataset_id: int,
-                      user_id: int):
+                      user_id: int,
+                      total_samples: int = 0):
         """Создаёт запись об экспорте со статусом processing."""
         query = exports_table.insert().values(
             dataset_id=dataset_id,
             user_id=user_id,
             status="processing",
+            stage="processing",
             exported_samples=0,
+            total_samples=total_samples,
         )
         result = self.db.execute(query)
         self.db.commit()
@@ -37,15 +40,45 @@ class ExportRepository:
         )
         return self.db.execute(query).fetchone()
 
+    def update_progress(
+        self,
+        export_id: int,
+        exported_samples: int,
+        stage: str = "processing",
+    ) -> None:
+        query = (
+            exports_table.update()
+            .where(exports_table.c.id == export_id)
+            .values(exported_samples=exported_samples, stage=stage)
+        )
+        self.db.execute(query)
+        self.db.commit()
+
+    def update_stage(self, export_id: int, stage: str) -> None:
+        query = (
+            exports_table.update()
+            .where(exports_table.c.id == export_id)
+            .values(stage=stage)
+        )
+        self.db.execute(query)
+        self.db.commit()
+
     def mark_completed(self,
                        export_id: int,
                        s3_key: str,
-                       exported_samples: int = 0) -> None:
+                       exported_samples: int = 0,
+                       total_samples: int = 0) -> None:
         """Помечает экспорт успешно завершённым."""
         query = (
             exports_table.update()
             .where(exports_table.c.id == export_id)
-            .values(status="completed", s3_key=s3_key, exported_samples=exported_samples)
+            .values(
+                status="completed",
+                stage="completed",
+                s3_key=s3_key,
+                exported_samples=exported_samples,
+                total_samples=total_samples,
+            )
         )
         self.db.execute(query)
         self.db.commit()
@@ -57,7 +90,7 @@ class ExportRepository:
         query = (
             exports_table.update()
             .where(exports_table.c.id == export_id)
-            .values(status="failed", error=error)
+            .values(status="failed", stage="failed", error=error)
         )
         self.db.execute(query)
         self.db.commit()
