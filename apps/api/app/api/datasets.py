@@ -16,6 +16,7 @@ from apps.api.app.deps import (
     get_current_user,
     get_dataset_or_404,
     get_dataset_service,
+    get_dataset_statistics_service,
     get_import_job_repo,
     get_sample_repo,
     get_s3_client,
@@ -32,6 +33,8 @@ from core.application.visualizer import (
 from core.infrastructure.s3.client import S3Client
 from apps.api.app.import_tasks import run_new_dataset_import
 from apps.api.app.schemas.import_job import ImportJobDTO
+from apps.api.app.schemas.dataset_statistics import DatasetStatisticsDTO
+from core.application.dataset_statistics_service import DatasetStatisticsService
 
 
 
@@ -39,6 +42,28 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+
+@router.get("/{dataset_id}/statistics", response_model=DatasetStatisticsDTO)
+def get_dataset_statistics(
+    dataset_id: int,
+    grid_size: int = Query(20, ge=1, le=50),
+    _user: CurrentUser = Depends(require_dataset_role({"owner", "labeler", "observer"})),
+    dataset=Depends(get_dataset_or_404),
+    service: DatasetStatisticsService = Depends(get_dataset_statistics_service),
+) -> DatasetStatisticsDTO:
+    """Возвращает статистику по сплитам, классам и расположению разметки."""
+    try:
+        return service.get_statistics(
+            dataset_id=dataset_id,
+            task=TaskType(dataset.task),
+            grid_size=grid_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Не удалось построить статистику датасета: {exc}",
+        ) from exc
 
 
 @router.get("/")

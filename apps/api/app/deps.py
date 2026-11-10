@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from core.application.annotation_service import AnnotationService
 from core.application.auth_service import AuthService
 from core.application.dataset_service import DatasetService
+from core.application.dataset_statistics_service import DatasetStatisticsService
 from core.application.export_service import ExportService
 from core.application.import_service import ImportService
 from core.application.review_service import ReviewService
@@ -171,6 +172,18 @@ def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
         class_repo=class_repo,
         membership_repo=membership_repo,
         sample_repo=sample_repo,
+    )
+
+
+def get_dataset_statistics_service(
+    sample_repo=Depends(get_sample_repo),
+    class_repo=Depends(get_class_repo),
+    s3: S3Client = Depends(get_s3_client),
+) -> DatasetStatisticsService:
+    return DatasetStatisticsService(
+        sample_repo=sample_repo,
+        class_repo=class_repo,
+        s3_client=s3,
     )
 
 

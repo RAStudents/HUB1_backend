@@ -272,6 +272,25 @@ class SampleRepository:
             "unlabeled": sum(count for is_labeled, count in rows if not is_labeled),
         }
 
+    def iter_statistics_rows(self, dataset_id: int):
+        """Streams sample splits and persisted geometries for dataset statistics."""
+        query = (
+            select(
+                samples_table.c.id,
+                samples_table.c.split,
+                sample_geometries_table.c.geometry_json,
+            )
+            .select_from(
+                samples_table.outerjoin(
+                    sample_geometries_table,
+                    samples_table.c.id == sample_geometries_table.c.sample_id,
+                )
+            )
+            .where(samples_table.c.dataset_id == dataset_id)
+            .order_by(samples_table.c.id)
+        )
+        return self.db.execute(query).yield_per(1000)
+
     def get_class_counts(self, dataset_id: int) -> dict[int, int]:
         rows = self.db.execute(
             select(

@@ -44,16 +44,6 @@ def _check_password(password: str) -> str:
     return password
 
 
-def _aware(value: datetime | str | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        value = datetime.fromisoformat(value)
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
 class AuthService:
     def __init__(self,
                  user_repo: Any,
@@ -114,31 +104,31 @@ class AuthService:
         if not isinstance(refresh_token, str) or not refresh_token or len(refresh_token) > 200:
             raise PermissionError("Недействительный refresh-токен")
 
-        row = self.tokens.get_refresh_by_hash(hash_refresh_token(refresh_token))
-        if row is None:
-            raise PermissionError("Недействительный refresh-токен")
-
         now = datetime.now(timezone.utc)
-        if row.revoked_at is not None:
-            self.tokens.revoke_family(row.family_id)
+        next_refresh_token = new_refresh_token()
+        state, row = self.tokens.rotate_refresh_token(
+            token_hash=hash_refresh_token(refresh_token),
+            new_token_hash=hash_refresh_token(next_refresh_token),
+            expires_at=now + refresh_ttl(),
+            now=now,
+        )
+        if state == "reused":
             raise PermissionError("Сессия отозвана. Войдите снова.")
-
-        expires_at = _aware(row.expires_at)
-        if expires_at is None or expires_at <= now:
-            self.tokens.revoke_refresh(row.id)
+        if state == "expired":
             raise PermissionError("Сессия истекла. Войдите снова.")
+        if state != "rotated" or row is None:
+            raise PermissionError("Недействительный refresh-токен")
 
         user = self.users.get_by_id(row.user_id)
         if user is None:
             self.tokens.revoke_family(row.family_id)
             raise PermissionError("Недействительный refresh-токен")
 
-        return self._issue_session(
+        return self._session_response(
             user_id=user.id,
             email=user.email,
             name=user.name,
-            family_id=row.family_id,
-            revoke_refresh_id=row.id,
+            refresh_token=next_refresh_token,
         )
 
     def logout(self,
@@ -223,20 +213,22 @@ class AuthService:
     def _issue_session(self,
                        user_id: int,
                        email: str,
-                       name: str,
-                       family_id: str | None = None,
-                       revoke_refresh_id: int | None = None) -> dict:
-        access_token, _jti, _expires_at = create_access_token(user_id)
+                       name: str) -> dict:
         refresh_token = new_refresh_token()
-        refresh_id = self.tokens.store_refresh(
+        self.tokens.store_refresh(
             user_id=user_id,
             token_hash=hash_refresh_token(refresh_token),
-            family_id=family_id or new_family_id(),
+            family_id=new_family_id(),
             expires_at=datetime.now(timezone.utc) + refresh_ttl(),
         )
-        if revoke_refresh_id is not None:
-            self.tokens.revoke_refresh(revoke_refresh_id, replaced_by_id=refresh_id)
+        return self._session_response(user_id, email, name, refresh_token)
 
+    @staticmethod
+    def _session_response(user_id: int,
+                          email: str,
+                          name: str,
+                          refresh_token: str) -> dict:
+        access_token, _jti, _expires_at = create_access_token(user_id)
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
