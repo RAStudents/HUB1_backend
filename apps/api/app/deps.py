@@ -1,6 +1,7 @@
 # apps/api/app/deps.py
 
 import logging
+from datetime import datetime, timezone
 from typing import Callable, Set
 
 from fastapi import Depends, HTTPException, status
@@ -12,7 +13,7 @@ from core.application.dataset_service import DatasetService
 from core.application.export_service import ExportService
 from core.application.import_service import ImportService
 from core.application.review_service import ReviewService
-from core.infrastructure.auth.tokens import decode_access_token
+from core.infrastructure.auth.tokens import decode_access_claims
 from core.infrastructure.email.smtp import SMTPEmailService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.sql.base import get_db
@@ -87,22 +88,35 @@ def get_event_repo(db=Depends(get_db_connection)):
     return EventRepository(db)
 
 
+def get_auth_token_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.auth_tokens import AuthTokenRepository
+    return AuthTokenRepository(db)
+
+
 # --- Аутентификация ---
 
 class CurrentUser:
-    def __init__(self, id: int):
+    def __init__(self, id: int, jti: str, access_expires_at):
         self.id = id
+        self.jti = jti
+        self.access_expires_at = access_expires_at
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> CurrentUser:
-    """Декодирует JWT из заголовка Authorization и возвращает текущего пользователя."""
-    user_id = decode_access_token(credentials.credentials)
-    if not user_id:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security),
+                     token_repo=Depends(get_auth_token_repo)) -> CurrentUser:
+    """Декодирует JWT и отвергает отозванный access-токен."""
+    claims = decode_access_claims(credentials.credentials)
+    if not claims or token_repo.is_access_revoked(claims["jti"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return CurrentUser(id=user_id)
+    return CurrentUser(
+        id=int(claims["sub"]),
+        jti=claims["jti"],
+        access_expires_at=datetime.fromtimestamp(claims["exp"], tz=timezone.utc),
+    )
 
 
 # --- Авторизация ---
@@ -143,8 +157,9 @@ def get_dataset_or_404(dataset_id: int,
 
 # --- Сервисы (Application layer) ---
 
-def get_auth_service(user_repo=Depends(get_user_repo)) -> AuthService:
-    return AuthService(user_repo=user_repo)
+def get_auth_service(user_repo=Depends(get_user_repo),
+                     token_repo=Depends(get_auth_token_repo)) -> AuthService:
+    return AuthService(user_repo=user_repo, token_repo=token_repo)
 
 
 def get_dataset_service(dataset_repo=Depends(get_dataset_repo),

@@ -159,3 +159,26 @@ import_jobs_table = Table(
     Column("error", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
+
+refresh_tokens_table = Table(
+    "refresh_tokens",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("family_id", String(64), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("replaced_by_id", Integer, nullable=True),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index("ix_refresh_tokens_user", refresh_tokens_table.c.user_id)
+Index("ix_refresh_tokens_family", refresh_tokens_table.c.family_id)
+
+revoked_access_tokens_table = Table(
+    "revoked_access_tokens",
+    metadata,
+    Column("jti", String(64), primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+)

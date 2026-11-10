@@ -19,6 +19,7 @@ if ENV_FILE.is_file():
 
 from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
+from core.infrastructure.auth.tokens import assert_jwt_configured
 from core.infrastructure.sql.base import init_db
 
 
@@ -59,6 +60,13 @@ app.include_router(api_router)
 @app.on_event("startup")
 def startup_event():
     """Инициализирует БД и проверяет доступность S3 при старте приложения."""
+    try:
+        assert_jwt_configured()
+        print("[OK] JWT_SECRET задан.")
+    except Exception as exc:
+        print(f"[ERROR] {exc}")
+        raise
+
     try:
         init_db()
         print("[OK] Инициализация БД выполнена.")

@@ -1,6 +1,8 @@
 # core/infrastructure/sql/repos/users.py
 
 import logging
+from sqlalchemy import func
+
 from core.infrastructure.sql.schema import users_table
 
 
@@ -13,7 +15,10 @@ class UserRepository:
 
     def get_by_email(self,
                      email: str):
-        query = users_table.select().where(users_table.c.email == email)
+        normalized = email.strip().lower()
+        query = users_table.select().where(
+            func.lower(users_table.c.email) == normalized
+        )
         return self.db.execute(query).fetchone()
 
     def get_by_id(self,
@@ -62,6 +67,16 @@ class UserRepository:
             users_table.update()
             .where(users_table.c.id == user_id)
             .values(yandex_id=yandex_id)
+        )
+        self.db.execute(query)
+        self.db.commit()
+
+    def update_password_hash(self, user_id: int, password_hash: str) -> None:
+        """Меняет хэш после входа со старого sha256 на pbkdf2."""
+        query = (
+            users_table.update()
+            .where(users_table.c.id == user_id)
+            .values(password_hash=password_hash)
         )
         self.db.execute(query)
         self.db.commit()
