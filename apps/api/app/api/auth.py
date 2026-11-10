@@ -5,6 +5,7 @@ import logging
 import os
 from io import BytesIO
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
@@ -29,6 +30,7 @@ YANDEX_REDIRECT_URI = os.getenv(
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 MAX_AVATAR_PIXELS = 40_000_000
 AVATAR_SIZE = (512, 512)
+YANDEX_AVATAR_SIZE = "islands-200"
 
 
 def _profile_with_avatar(profile: dict[str, Any],
@@ -64,6 +66,46 @@ def _normalize_avatar(content: bytes) -> bytes:
             return output.getvalue()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValueError("Не удалось прочитать изображение. Выберите JPEG, PNG или WebP") from exc
+
+
+async def _store_yandex_avatar(
+    s3: S3Client,
+    user_id: int,
+    avatar_id: str | None,
+) -> None:
+    if not isinstance(avatar_id, str) or not avatar_id.strip():
+        return
+
+    try:
+        key = user_avatar_key(user_id)
+        if s3.get_bytes(key):
+            return
+
+        avatar_url = (
+            f"https://avatars.yandex.net/get-yapic/{quote(avatar_id, safe='')}"
+            f"/{YANDEX_AVATAR_SIZE}"
+        )
+        content = bytearray()
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", avatar_url, timeout=10.0) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length and int(content_length) > MAX_AVATAR_BYTES:
+                    raise ValueError("Аватар Яндекса превышает допустимый размер")
+
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > MAX_AVATAR_BYTES:
+                        raise ValueError("Аватар Яндекса превышает допустимый размер")
+
+        normalized_avatar = _normalize_avatar(bytes(content))
+        s3.put_bytes(
+            key,
+            normalized_avatar,
+            content_type="image/webp",
+        )
+    except (httpx.HTTPError, ValueError, OSError) as exc:
+        logger.warning("Не удалось сохранить аватар Яндекса для пользователя %s: %s", user_id, exc)
 
 
 def _require_yandex_configured() -> None:
@@ -193,13 +235,15 @@ def yandex_login():
         f"https://oauth.yandex.ru/authorize?response_type=code"
         f"&client_id={YANDEX_CLIENT_ID}"
         f"&redirect_uri={YANDEX_REDIRECT_URI}"
+        f"&force_confirm=yes"
     )
     return {"auth_url": auth_url}
 
 
 @router.get("/yandex/callback", summary="Колбэк Яндекс OAuth")
 async def yandex_callback(code: str,
-                          service: AuthService = Depends(get_auth_service)):
+                          service: AuthService = Depends(get_auth_service),
+                          s3: S3Client = Depends(get_s3_client)):
     _require_yandex_configured()
 
     async with httpx.AsyncClient() as client:
@@ -239,4 +283,11 @@ async def yandex_callback(code: str,
         or info.get("login")
         or "Yandex User"
     )
-    return service.login_with_yandex(yandex_id=yandex_id, email=email, name=name)
+    auth_response = service.login_with_yandex(yandex_id=yandex_id, email=email, name=name)
+    if not info.get("is_avatar_empty"):
+        await _store_yandex_avatar(
+            s3=s3,
+            user_id=auth_response["user_id"],
+            avatar_id=info.get("default_avatar_id"),
+        )
+    return auth_response
