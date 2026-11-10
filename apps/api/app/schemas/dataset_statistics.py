@@ -16,6 +16,13 @@ class DatasetAnnotationLocationsDTO(BaseModel):
     classes: list[DatasetClassHeatmapDTO]
 
 
+class DatasetSplitStatisticsDTO(BaseModel):
+    image_count: int
+    annotation_count: int
+    annotations_per_class: list[DatasetClassCountDTO]
+    annotation_locations: DatasetAnnotationLocationsDTO
+
+
 class DatasetStatisticsDTO(BaseModel):
     dataset_id: int
     task: str
@@ -25,3 +32,4 @@ class DatasetStatisticsDTO(BaseModel):
     annotation_count: int
     annotations_per_class: list[DatasetClassCountDTO]
     annotation_locations: DatasetAnnotationLocationsDTO
+    splits: dict[str, DatasetSplitStatisticsDTO | None]

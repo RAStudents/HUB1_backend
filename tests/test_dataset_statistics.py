@@ -57,22 +57,23 @@ class DatasetStatisticsServiceTests(unittest.TestCase):
                 id=1,
                 split="train",
                 geometry_json=(
-                    '[{"class_id":0,"box":{"x":0.1,"y":0.1}},'
-                    '{"class_id":1,"obb":{"x":0.5,"y":0.5}}]'
+                    '[{"class_id":0,"box":{"x":0.1,"y":0.1,"width":0.1,"height":0.1}},'
+                    '{"class_id":1,"box":{"x":0.75,"y":0.75,"width":0.2,"height":0.2}}]'
                 ),
             ),
             SimpleNamespace(
                 id=2,
                 split="valid",
                 geometry_json=(
-                    '[{"class_id":0,"polygon":{"points":'
-                    '[{"x":0.2,"y":0.2},{"x":0.4,"y":0.4}]}}]'
+                    '[{"class_id":0,"box":{"x":0.4,"y":0.4,"width":0.1,"height":0.1}}]'
                 ),
             ),
             SimpleNamespace(
                 id=3,
                 split="test",
-                geometry_json='[{"class_id":1,"box":{"x":1.0,"y":1.0}}]',
+                geometry_json=(
+                    '[{"class_id":1,"box":{"x":0.95,"y":0.95,"width":0.1,"height":0.1}}]'
+                ),
             ),
         ]
         self.service = DatasetStatisticsService(
@@ -111,6 +112,16 @@ class DatasetStatisticsServiceTests(unittest.TestCase):
             result["annotation_locations"]["classes"][1]["heatmap"],
             [[0, 0], [0, 2]],
         )
+        self.assertEqual(result["splits"]["train"]["image_count"], 1)
+        self.assertEqual(result["splits"]["train"]["annotation_count"], 2)
+        self.assertEqual(
+            [item["count"] for item in result["splits"]["val"]["annotations_per_class"]],
+            [1, 0],
+        )
+        self.assertEqual(
+            result["splits"]["test"]["annotation_locations"]["classes"][1]["heatmap"],
+            [[0, 0], [0, 1]],
+        )
         DatasetStatisticsDTO.model_validate(result)
 
     def test_rejects_centers_outside_normalized_image(self):
@@ -118,11 +129,13 @@ class DatasetStatisticsServiceTests(unittest.TestCase):
             SimpleNamespace(
                 id=4,
                 split="train",
-                geometry_json='[{"class_id":0,"box":{"x":1.1,"y":0.5}}]',
+                geometry_json=(
+                    '[{"class_id":0,"box":{"x":1.1,"y":0.5,"width":0.1,"height":0.1}}]'
+                ),
             )
         ]
 
-        with self.assertRaisesRegex(ValueError, "выходит за границы"):
+        with self.assertRaises(ValueError):
             self.service.get_statistics(
                 dataset_id=42,
                 task=TaskType.DETECT,
@@ -134,16 +147,73 @@ class DatasetStatisticsServiceTests(unittest.TestCase):
             SimpleNamespace(
                 id=5,
                 split="train",
-                geometry_json='[{"class_id":8,"box":{"x":0.5,"y":0.5}}]',
+                geometry_json=(
+                    '[{"class_id":8,"box":{"x":0.5,"y":0.5,"width":0.2,"height":0.2}}]'
+                ),
             )
         ]
 
-        with self.assertRaisesRegex(ValueError, "неизвестная категория"):
+        with self.assertRaises(ValueError):
             self.service.get_statistics(
                 dataset_id=42,
                 task=TaskType.DETECT,
                 grid_size=20,
             )
+
+    def test_builds_obb_heatmap(self):
+        service = DatasetStatisticsService(
+            sample_repo=_SampleRepository(
+                [
+                    SimpleNamespace(
+                        id=7,
+                        split="train",
+                        geometry_json=(
+                            '[{"class_id":1,"obb":{"x":0.75,"y":0.75,'
+                            '"width":0.2,"height":0.2,"angle_deg":45}}]'
+                        ),
+                    )
+                ]
+            ),
+            class_repo=_ClassRepository(),
+            s3_client=None,
+        )
+
+        result = service.get_statistics(
+            dataset_id=42,
+            task=TaskType.OBB,
+            grid_size=2,
+        )
+
+        self.assertEqual(result["annotation_count"], 1)
+        self.assertEqual(result["annotation_locations"]["all"], [[0, 0], [0, 1]])
+
+    def test_builds_segment_heatmap(self):
+        service = DatasetStatisticsService(
+            sample_repo=_SampleRepository(
+                [
+                    SimpleNamespace(
+                        id=8,
+                        split="train",
+                        geometry_json=(
+                            '[{"class_id":0,"polygon":{"points":'
+                            '[{"x":0.1,"y":0.1},{"x":0.2,"y":0.1},'
+                            '{"x":0.1,"y":0.2}]}}]'
+                        ),
+                    )
+                ]
+            ),
+            class_repo=_ClassRepository(),
+            s3_client=None,
+        )
+
+        result = service.get_statistics(
+            dataset_id=42,
+            task=TaskType.SEGMENT,
+            grid_size=2,
+        )
+
+        self.assertEqual(result["annotation_count"], 1)
+        self.assertEqual(result["annotation_locations"]["all"], [[1, 0], [0, 0]])
 
     def test_builds_and_persists_missing_legacy_geometries(self):
         sample_repo = _LegacySampleRepository()

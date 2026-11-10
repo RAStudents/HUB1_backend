@@ -2,6 +2,7 @@
 
 import math
 import logging
+from enum import EnumMeta
 from typing import List, Sequence
 
 from acmenra_cv import Box, Instance, Obb, Point, Polygon, TaskType
@@ -60,14 +61,15 @@ def instance_to_dto(instance: Instance,
 
 def dto_to_instance(dto: AnnotationItemDTO,
                     task: TaskType,
-                    class_names: Sequence[str]) -> Instance:
+                    class_names: Sequence[str],
+                    category: EnumMeta | None = None) -> Instance:
     """
     Собирает Instance из DTO фронтенда для сохранения в .txt и отрисовки Drawer-ом.
 
     - Для OBB и SEGMENT создаёт технический пустой Box() (требование конструктора Instance).
     - Угол OBB переводится из градусов в радианы.
     """
-    category_enum = make_category_enum(class_names)
+    category_enum = category or make_category_enum(class_names)
     members_by_val = {item.value: item for item in category_enum}
     label_enum = members_by_val.get(dto.class_id, list(category_enum)[0])
     placeholder_box = Box()
@@ -123,6 +125,7 @@ def instances_to_dtos(instances: List[Instance],
 
 def dtos_to_instances(dtos: List[AnnotationItemDTO],
                       task: TaskType,
-                      class_names: Sequence[str]) -> List[Instance]:
+                      class_names: Sequence[str],
+                      category: EnumMeta | None = None) -> List[Instance]:
     """Конвертирует список DTO в список Instance."""
-    return [dto_to_instance(d, task, class_names) for d in dtos]
+    return [dto_to_instance(d, task, class_names, category) for d in dtos]
