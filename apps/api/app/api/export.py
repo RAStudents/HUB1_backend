@@ -6,7 +6,7 @@ from urllib.parse import quote
 from acmenra_cv import TaskType
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 
 from apps.api.app.deps import (
     CurrentUser,
@@ -196,20 +196,25 @@ def download_export(dataset_id: int,
     if record is None or record.status != "completed" or not record.s3_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
 
-    zip_bytes = s3.get_bytes(record.s3_key)
-    if zip_bytes is None:
+    if not str(record.s3_key).startswith(f"datasets/{int(dataset_id)}/exports/"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
+    try:
+        zip_path = s3.safe_path(record.s3_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден") from exc
+    if not zip_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден в хранилище")
 
     filename = dataset.name.strip().replace("/", "_").replace("\\", "_") or f"dataset_{dataset_id}"
     encoded_filename = quote(f"{filename}.zip", safe="")
-    return StreamingResponse(
-        BytesIO(zip_bytes),
+    return FileResponse(
+        zip_path,
         media_type="application/zip",
         headers={
             "Content-Disposition": (
                 f'attachment; filename="dataset_{dataset_id}.zip"; '
                 f"filename*=UTF-8''{encoded_filename}"
             ),
-            "Content-Length": str(len(zip_bytes)),
+            "X-Content-Type-Options": "nosniff",
         },
     )

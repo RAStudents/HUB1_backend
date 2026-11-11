@@ -2,7 +2,7 @@
 
 import os
 import logging
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from core.infrastructure.sql.schema import metadata
@@ -16,6 +16,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./hub_mvp.db")
 _connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 
 engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+if "sqlite" in DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

@@ -9,6 +9,7 @@ from apps.api.app.deps import (
     get_review_service,
     require_dataset_role,
 )
+from apps.api.app.errors import client_error
 from apps.api.app.schemas.review import ReviewDecisionDTO, ReviewStatusDTO
 from core.application.review_service import ReviewService
 
@@ -41,11 +42,11 @@ def submit_sample_for_review(
         )
         return ReviewStatusDTO(sample_id=sample_id, status=new_status)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc)) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=client_error(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=client_error(exc)) from exc
 
 
 @router.post(
@@ -69,11 +70,11 @@ def decide_sample_review(
         )
         return ReviewStatusDTO(sample_id=sample_id, status=new_status)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc)) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=client_error(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=client_error(exc)) from exc
 
 
 @router.post(
@@ -95,8 +96,8 @@ def reopen_sample_for_revision(
         )
         return ReviewStatusDTO(sample_id=sample_id, status=new_status)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc)) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=client_error(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=client_error(exc)) from exc

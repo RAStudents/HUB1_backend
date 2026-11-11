@@ -98,6 +98,7 @@ class SampleRepository:
         self.db.execute(query)
         self.db.commit()
 
+
     def acquire_sample_lock(
         self,
         dataset_id: int,
@@ -151,6 +152,38 @@ class SampleRepository:
             return True
         self.db.rollback()
         return False
+
+
+    def unlock_sample(self, sample_id: int) -> None:
+        query = (
+            samples_table.update()
+            .where(samples_table.c.id == sample_id)
+            .values(lock_user=None, lock_until=None)
+        )
+        self.db.execute(query)
+        self.db.commit()
+
+    def set_status_if(self, sample_id: int, expected: str, status: str) -> bool:
+        result = self.db.execute(
+            samples_table.update()
+            .where(
+                (samples_table.c.id == sample_id)
+                & (samples_table.c.status == expected)
+            )
+            .values(status=status)
+        )
+        self.db.commit()
+        return result.rowcount == 1
+
+    def first_thumb_key(self, dataset_id: int) -> str | None:
+        row = self.db.execute(
+            select(samples_table.c.thumb_key)
+            .where(samples_table.c.dataset_id == dataset_id)
+            .order_by(samples_table.c.id)
+            .limit(1)
+        ).first()
+        return row.thumb_key if row else None
+
 
     def set_status(self,
                    sample_id: int,
@@ -231,6 +264,7 @@ class SampleRepository:
         class_ids: list[int],
         offset: int,
         limit: int,
+        stems: list[str] | None = None,
     ) -> tuple[int, list]:
         annotation_counts = (
             select(
@@ -255,11 +289,18 @@ class SampleRepository:
         if labeled is not None:
             filters.append(samples_table.c.is_labeled == labeled)
         if search:
-            search_term = f"%{search}%"
+            escaped = (
+                search.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            search_term = f"%{escaped}%"
             filters.append(or_(
-                samples_table.c.stem.ilike(search_term),
-                samples_table.c.image_key.ilike(search_term),
+                samples_table.c.stem.ilike(search_term, escape="\\"),
+                samples_table.c.image_key.ilike(search_term, escape="\\"),
             ))
+        if stems:
+            filters.append(samples_table.c.stem.in_(stems))
         if class_ids:
             matching_classes = (
                 select(annotations_table.c.sample_id)
@@ -329,25 +370,6 @@ class SampleRepository:
             "labeled": sum(count for is_labeled, count in rows if is_labeled),
             "unlabeled": sum(count for is_labeled, count in rows if not is_labeled),
         }
-
-    def iter_statistics_rows(self, dataset_id: int):
-        """Streams sample splits and persisted geometries for dataset statistics."""
-        query = (
-            select(
-                samples_table.c.id,
-                samples_table.c.split,
-                sample_geometries_table.c.geometry_json,
-            )
-            .select_from(
-                samples_table.outerjoin(
-                    sample_geometries_table,
-                    samples_table.c.id == sample_geometries_table.c.sample_id,
-                )
-            )
-            .where(samples_table.c.dataset_id == dataset_id)
-            .order_by(samples_table.c.id)
-        )
-        return self.db.execute(query).yield_per(1000)
 
     def get_class_counts(self, dataset_id: int) -> dict[int, int]:
         rows = self.db.execute(

@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, List
 from acmenra_cv import TaskType
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
@@ -12,6 +12,9 @@ from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 from core.infrastructure.cv.labels import parse_label_file, write_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 
+from core.application.lock_service import LockService
+from core.domain.enums import SampleStatusEnum
+from core.domain.status import StatusTransitionValidator
 from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
 
 
@@ -93,6 +96,15 @@ class AnnotationService:
         if role == "labeler" and sample.status != "in_progress":
             raise PermissionError("Разметчик может изменять только кадр в работе")
 
+        current = SampleStatusEnum(sample.status)
+        if current == SampleStatusEnum.IN_REVIEW:
+            raise ValueError("Кадр на проверке, правка недоступна")
+        if current == SampleStatusEnum.ACCEPTED and role != "owner":
+            raise PermissionError("Принятый кадр может вернуть только владелец")
+        target = SampleStatusEnum.IN_PROGRESS
+        if current != target and not StatusTransitionValidator.can_transition(current, target):
+            raise ValueError("Этот кадр сейчас нельзя редактировать")
+
         now = datetime.now(timezone.utc)
         lock_until = sample.lock_until
         if lock_until is not None and lock_until.tzinfo is None:
@@ -100,6 +112,11 @@ class AnnotationService:
         lock_expired = lock_until and lock_until < now
         if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
+        self.samples.lock_sample(
+            sample_id=sample_id,
+            user_id=user_id,
+            lock_until=now + timedelta(minutes=20),
+        )
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
         instances = dtos_to_instances(dtos=items, task=task, class_names=class_names)
@@ -161,7 +178,12 @@ class AnnotationService:
             is_labeled=bool(instances),
             parse_error=None,
         )
-        self.samples.set_status(sample_id=sample_id, status="in_progress")
+        if current != target and not self.samples.set_status_if(
+            sample_id=sample_id,
+            expected=current.value,
+            status=target.value,
+        ):
+            raise ValueError("Статус кадра уже изменился")
 
         if self.events is not None:
             self.events.log(

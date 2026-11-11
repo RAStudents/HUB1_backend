@@ -9,12 +9,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
-# Регистрируем поддержку HEIC/HEIF в Pillow один раз при импорте модуля
 pillow_heif.register_heif_opener()
+Image.MAX_IMAGE_PIXELS = 40_000_000
 
 KEEP_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 CONVERT_EXTENSIONS = {".heic", ".heif", ".webp", ".bmp", ".tiff", ".tif"}
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 
 def normalize_image_file(src_path: Path,
@@ -34,7 +34,9 @@ def normalize_image_file(src_path: Path,
     try:
         file_bytes = src_path.read_bytes()
     except Exception as exc:
-        raise ValueError(f"Не удалось прочитать файл {src_path}: {exc}") from exc
+        raise ValueError(f"Не удалось прочитать файл {src_path.name}") from exc
+    if len(file_bytes) > _MAX_IMAGE_BYTES:
+        raise ValueError(f"Изображение слишком большое: {src_path.name}")
 
     if ext in KEEP_EXTENSIONS:
         content_type = "image/png" if ext == ".png" else "image/jpeg"
@@ -47,6 +49,6 @@ def normalize_image_file(src_path: Path,
                 img.convert("RGB").save(buf, format="JPEG", quality=jpeg_quality)
                 return buf.getvalue(), f"{stem}.jpg", "image/jpeg"
         except Exception as exc:
-            raise ValueError(f"Ошибка конвертации изображения {src_path}: {exc}") from exc
+            raise ValueError(f"Ошибка конвертации изображения {src_path.name}") from exc
 
     raise ValueError(f"Неподдерживаемый формат изображения: {ext}")

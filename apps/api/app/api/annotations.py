@@ -10,6 +10,7 @@ from apps.api.app.deps import (
     get_dataset_or_404,
     require_dataset_role,
 )
+from apps.api.app.errors import client_error
 from apps.api.app.schemas.annotation import FrameAnnotationsDTO
 from core.application.annotation_service import AnnotationService
 
@@ -40,10 +41,10 @@ def get_annotations(dataset_id: int,
             task=TaskType(dataset.task),
         )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc))
     except PermissionError as exc:
         # 404 на чужой датасет, чтобы не раскрывать существование приватных id
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc))
 
 
 @router.put("", response_model=FrameAnnotationsDTO)
@@ -68,8 +69,8 @@ def save_annotations(dataset_id: int,
             items=payload.items,
         )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc))
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=client_error(exc))
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=client_error(exc))

@@ -28,7 +28,7 @@ from core.infrastructure.sql.base import get_db
 logger = logging.getLogger(__name__)
 
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # Глобальный инстанс S3-клиента (поднимается один раз при старте)
 _s3_client = S3Client()
@@ -117,9 +117,16 @@ class CurrentUser:
         self.access_expires_at = access_expires_at
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security),
-                     token_repo=Depends(get_auth_token_repo)) -> CurrentUser:
-    """Декодирует JWT и отвергает отозванный access-токен."""
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(security),
+                     token_repo=Depends(get_auth_token_repo),
+                     user_repo=Depends(get_user_repo)) -> CurrentUser:
+    """Декодирует JWT, отвергает отозванный токен и удалённого пользователя."""
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     claims = decode_access_claims(credentials.credentials)
     if not claims or token_repo.is_access_revoked(claims["jti"]):
         raise HTTPException(
@@ -127,8 +134,15 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Недействительный или просроченный токен авторизации",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    user_id = int(claims["sub"])
+    if user_repo.get_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return CurrentUser(
-        id=int(claims["sub"]),
+        id=user_id,
         jti=claims["jti"],
         access_expires_at=datetime.fromtimestamp(claims["exp"], tz=timezone.utc),
     )
@@ -159,10 +173,17 @@ def require_dataset_role(allowed_roles: Set[str]) -> Callable:
 
 def get_dataset_or_404(dataset_id: int,
                        user: CurrentUser = Depends(get_current_user),
-                       dataset_repo=Depends(get_dataset_repo)):
-    """Проверяет существование датасета (защита от IDOR)."""
+                       dataset_repo=Depends(get_dataset_repo),
+                       membership_repo=Depends(get_membership_repo)):
+    """Нет датасета или нет роли в приватном датасете — один и тот же 404."""
     dataset = dataset_repo.get_by_id(dataset_id=dataset_id)
     if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Датасет не найден",
+        )
+    role = membership_repo.get_user_role(dataset_id=dataset_id, user_id=user.id)
+    if role is None and dataset.is_private:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Датасет не найден",
@@ -189,11 +210,10 @@ def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
     )
 
 
-def get_dataset_statistics_service(
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    s3: S3Client = Depends(get_s3_client),
-) -> DatasetStatisticsService:
+
+def get_dataset_statistics_service(sample_repo=Depends(get_sample_repo),
+                                   class_repo=Depends(get_class_repo),
+                                   s3: S3Client = Depends(get_s3_client)) -> DatasetStatisticsService:
     return DatasetStatisticsService(
         sample_repo=sample_repo,
         class_repo=class_repo,
@@ -263,6 +283,11 @@ def get_export_service(s3: S3Client = Depends(get_s3_client),
         export_repo=export_repo,
         membership_repo=membership_repo,
     )
+
+
+def get_lock_service(sample_repo=Depends(get_sample_repo),
+                     membership_repo=Depends(get_membership_repo)) -> LockService:
+    return LockService(sample_repo=sample_repo, membership_repo=membership_repo)
 
 
 def get_review_service(sample_repo=Depends(get_sample_repo),

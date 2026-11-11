@@ -14,10 +14,9 @@ from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
 
 from core.infrastructure.cv.thumbs import render_thumbnail_array
-
+from core.infrastructure.media.yaml_safe import load_yaml_file
 
 logger = logging.getLogger(__name__)
-
 
 STORAGE_DIR = Path("storage")
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
@@ -116,10 +115,10 @@ def load_acmenra_dataset(yaml_or_dir_path: Path,
 
     root = resolve_dataset_root(yaml_path.parent)
 
-    raw_cfg = yaml.safe_load(read_text_safe(yaml_path)) or {}
+    raw_cfg = load_yaml_file(yaml_path)
     raw_names = raw_cfg.get("names") or raw_cfg.get("classes") or []
     names = []
-    
+
     if isinstance(raw_names, dict):
         names = [str(raw_names[k]) for k in sorted(raw_names.keys())]
     elif isinstance(raw_names, list):
@@ -131,19 +130,21 @@ def load_acmenra_dataset(yaml_or_dir_path: Path,
         names = ["object"]
 
     category_enum = make_category_enum(names)
-    
+
     # Строгое чтение task из конфига, без дефолтов и попыток угадывания
     task_str = raw_cfg.get("task")
     if not task_str and fallback_task is None:
-        raise ValueError(f"В конфигурационном файле '{yaml_path.name}' обязательно должен быть явно указан параметр 'task'.")
-    
+        raise ValueError(
+            f"В конфигурационном файле '{yaml_path.name}' обязательно должен быть явно указан параметр 'task'.")
+
     try:
         task = TaskType(task_str) if task_str else fallback_task
     except ValueError:
         raise ValueError(f"Неизвестный тип задачи '{task_str}' в файле '{yaml_path.name}'.")
 
-    layout = DatasetLayout.REVERSE if (root / "images" / "train").exists() or (root / "images").exists() else DatasetLayout.DIRECT
-    
+    layout = DatasetLayout.REVERSE if (root / "images" / "train").exists() or (
+                root / "images").exists() else DatasetLayout.DIRECT
+
     train_path = raw_cfg.get("train", "train")
     if isinstance(train_path, str):
         train_path = train_path.strip().lstrip("./")
@@ -231,15 +232,15 @@ def find_dataset_gallery_image(root: Path,
 
 
 def build_dataset_gallery(
-    dataset_id: int,
-    yaml_path: str | Path,
-    split_name: str = "train",
-    limit: int = 50,
-    offset: int = 0,
-    base_url: str = "http://127.0.0.1:8000",
-    class_ids: set[int] | None = None,
-    fallback_task: TaskType | None = None,
-    filenames: set[str] | None = None,
+        dataset_id: int,
+        yaml_path: str | Path,
+        split_name: str = "train",
+        limit: int = 50,
+        offset: int = 0,
+        base_url: str = "http://127.0.0.1:8000",
+        class_ids: set[int] | None = None,
+        fallback_task: TaskType | None = None,
+        filenames: set[str] | None = None,
 ) -> tuple[List[Dict[str, Any]], int]:
     resolved_yaml = resolve_yaml_path(yaml_path)
     root = resolve_dataset_root(resolved_yaml.parent)
@@ -290,8 +291,8 @@ def build_dataset_gallery(
 
         source_image_mtime = img_path.stat().st_mtime if img_path.exists() else 0
         image_is_current = (
-            dest_img_path.exists()
-            and dest_img_path.stat().st_mtime >= source_image_mtime
+                dest_img_path.exists()
+                and dest_img_path.stat().st_mtime >= source_image_mtime
         )
         label_mtime = (
             label_path.stat().st_mtime
@@ -299,8 +300,8 @@ def build_dataset_gallery(
             else 0
         )
         mask_is_current = (
-            dest_mask_path.exists()
-            and dest_mask_path.stat().st_mtime >= max(source_image_mtime, label_mtime)
+                dest_mask_path.exists()
+                and dest_mask_path.stat().st_mtime >= max(source_image_mtime, label_mtime)
         )
 
         img_array = None
@@ -330,7 +331,7 @@ def build_dataset_gallery(
         annotation_counts: dict[int, int] = {}
         for instance in instances:
             annotation_counts[instance.class_id] = (
-                annotation_counts.get(instance.class_id, 0) + 1
+                    annotation_counts.get(instance.class_id, 0) + 1
             )
         visible_instances = (
             instances

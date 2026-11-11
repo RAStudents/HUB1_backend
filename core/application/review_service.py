@@ -41,7 +41,8 @@ class ReviewService:
         if current != SampleStatusEnum.IN_PROGRESS or not StatusTransitionValidator.can_transition(current, target):
             raise ValueError("На проверку можно отправить только кадр в работе")
 
-        self.samples.set_status(sample_id=sample_id, status=target.value)
+        if not self.samples.set_status_if(sample_id=sample_id, expected=current.value, status=target.value):
+            raise ValueError("Статус кадра уже изменился")
         self._log(dataset_id, sample_id, user_id, "sample_submitted_for_review")
         return target.value
 
@@ -63,7 +64,8 @@ class ReviewService:
         if current != SampleStatusEnum.IN_REVIEW or not StatusTransitionValidator.can_transition(current, target):
             raise ValueError("Решение можно принять только для кадра на проверке")
 
-        self.samples.set_status(sample_id=sample_id, status=target.value)
+        if not self.samples.set_status_if(sample_id=sample_id, expected=current.value, status=target.value):
+            raise ValueError("Статус кадра уже изменился")
         self._log(dataset_id, sample_id, user_id, f"sample_{target.value}")
         return target.value
 
@@ -84,7 +86,8 @@ class ReviewService:
         if current != SampleStatusEnum.REJECTED or not StatusTransitionValidator.can_transition(current, target):
             raise ValueError("На доработку можно вернуть только отклонённый кадр")
 
-        self.samples.set_status(sample_id=sample_id, status=target.value)
+        if not self.samples.set_status_if(sample_id=sample_id, expected=current.value, status=target.value):
+            raise ValueError("Статус кадра уже изменился")
         self._log(dataset_id, sample_id, user_id, "sample_reopened_for_revision")
         return target.value
 

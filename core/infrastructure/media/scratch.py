@@ -59,14 +59,18 @@ def scratch_file(suffix: str = "",
         path.unlink(missing_ok=True)
 
 
+MAX_ZIP_FILES = 20_000
+MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024
+_SYMLINK_MODE = 0o120000
+
+
+def _is_symlink(member: zipfile.ZipInfo) -> bool:
+    return ((member.external_attr >> 16) & 0o170000) == _SYMLINK_MODE
+
+
 def extract_zip_safely(zip_bytes_or_path: bytes | Path,
                        dest_dir: Path) -> Path:
-    """
-    Распаковывает ZIP-архив в dest_dir с защитой от Zip Slip-атаки.
-
-    Если архив содержит одну корневую папку (типичный случай при архивации датасета),
-    возвращает путь прямо к ней; иначе — путь к директории с распакованным содержимым.
-    """
+    """Распаковывает ZIP внутри dest_dir. Без выхода из каталога, бомб и симлинков."""
     if isinstance(zip_bytes_or_path, bytes):
         zip_file_path = dest_dir / "_upload.zip"
         zip_file_path.write_bytes(zip_bytes_or_path)
@@ -75,26 +79,31 @@ def extract_zip_safely(zip_bytes_or_path: bytes | Path,
 
     extract_root = dest_dir / "extracted"
     extract_root.mkdir(parents=True, exist_ok=True)
+    root = extract_root.resolve()
+    total = 0
+    count = 0
 
     with zipfile.ZipFile(zip_file_path, "r") as zf:
         for member in zf.infolist():
-            # Пропускаем системный мусор macOS
             if "__MACOSX" in member.filename or Path(member.filename).name.startswith("._"):
                 continue
-
-            # Защита от Zip Slip: целевой путь должен оставаться внутри extract_root
+            count += 1
+            if count > MAX_ZIP_FILES:
+                raise ValueError("Слишком много файлов в архиве")
+            if _is_symlink(member):
+                raise ValueError(f"Симлинки в архиве запрещены: {member.filename}")
+            total += member.file_size
+            if total > MAX_ZIP_BYTES:
+                raise ValueError("Архив слишком большой")
             target_path = (extract_root / member.filename).resolve()
-            if not str(target_path).startswith(str(extract_root.resolve())):
+            if not target_path.is_relative_to(root):
                 raise ValueError(f"Небезопасный путь в архиве: {member.filename}")
-
             zf.extract(member, extract_root)
 
     if isinstance(zip_bytes_or_path, bytes):
         zip_file_path.unlink(missing_ok=True)
 
-    # Если всё упаковано в одну вложенную папку — спускаемся в неё
     subdirs = [p for p in extract_root.iterdir() if not p.name.startswith(".")]
     if len(subdirs) == 1 and subdirs[0].is_dir():
         return subdirs[0]
-
     return extract_root

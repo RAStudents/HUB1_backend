@@ -1,16 +1,15 @@
 # core/application/dataset_service.py
 
 import logging
-from pathlib import Path
 from typing import Any, List
-from urllib.parse import quote
+
+from core.infrastructure.s3.client import media_url
 
 
 logger = logging.getLogger(__name__)
 
 
 _DEFAULT_CLASSES = ["object_a", "object_b"]
-STORAGE_DIR = Path("storage")
 
 
 class DatasetService:
@@ -58,16 +57,8 @@ class DatasetService:
         catalog = []
         for row in rows:
             classes = self.classes.get_names(dataset_id=row.id)
-            ds_storage = STORAGE_DIR / f"dataset_{row.id}"
-
-            cover_url = None
-            if ds_storage.exists():
-                for split_name in ("train", "val", "valid", "test"):
-                    img_dir = ds_storage / split_name / "images"
-                    if img_dir.exists():
-                        imgs = [p for p in img_dir.iterdir() if p.is_file()]
-                        if imgs and cover_url is None:
-                            cover_url = f"{base_url}/storage/dataset_{row.id}/{split_name}/images/{quote(imgs[0].name)}"
+            thumb_key = self.samples.first_thumb_key(row.id)
+            cover_url = media_url(thumb_key, base_url=base_url) if thumb_key else None
 
             catalog.append({
                 "id": row.id,

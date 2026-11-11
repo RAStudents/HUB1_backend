@@ -166,7 +166,7 @@ import_jobs_table = Table(
     "import_jobs",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("dataset_id", Integer, nullable=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=True),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("status", String(50), server_default="queued", nullable=False),
     Column("stage", String(50), server_default="queued", nullable=False),

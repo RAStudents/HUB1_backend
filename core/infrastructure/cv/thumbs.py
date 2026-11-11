@@ -6,11 +6,14 @@ import numpy as np
 from pathlib import Path
 from typing import List
 
-from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 from acmenra_ds import ImageParser
+from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 
 
 logger = logging.getLogger(__name__)
+
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+_MAX_PIXELS = 40_000_000
 
 
 # Контрастная палитра для раскраски классов (RGB/BGR кортежи)
@@ -45,10 +48,16 @@ def read_image_unicode(image_path: Path) -> np.ndarray | None:
         if not path_obj.is_file():
             return None
         raw_bytes = path_obj.read_bytes()
-        if not raw_bytes:
+        if not raw_bytes or len(raw_bytes) > _MAX_IMAGE_BYTES:
             return None
         buf = np.frombuffer(raw_bytes, dtype=np.uint8)
-        return cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if frame is None:
+            return None
+        height, width = frame.shape[:2]
+        if height < 1 or width < 1 or height * width > _MAX_PIXELS:
+            return None
+        return frame
     except Exception:
         return None
 

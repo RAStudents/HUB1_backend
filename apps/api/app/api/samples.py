@@ -1,11 +1,10 @@
 # apps/api/app/api/samples.py
+
 import logging
-import os
-import tempfile
-from collections import Counter
 from pathlib import Path
 from typing import Optional
 from acmenra_cv import TaskType
+from collections import Counter
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 
@@ -30,13 +29,15 @@ from apps.api.app.schemas.sample import (
 )
 from apps.api.app.schemas.import_job import ImportJobDTO
 from apps.api.app.import_tasks import run_existing_dataset_import
+from apps.api.app.uploads import spool_upload
+from apps.api.app.errors import client_error
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.cv.labels import parse_label_file
 from core.infrastructure.cv.mapper import instances_to_dtos
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.convert import normalize_image_file
-from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+from core.infrastructure.s3.keys import clean_filename, clean_split, image_key, incoming_key, label_key, thumb_key
 
 
 logger = logging.getLogger(__name__)
@@ -70,32 +71,6 @@ def list_gallery_samples(
     normalized_split = split.lower() if split and split.lower() != "all" else None
     class_names = class_repo.get_names(dataset_id)
     task = TaskType(dataset.task)
-    missing_geometry_rows = sample_repo.list_missing_geometries(dataset_id)
-    for index, sample in enumerate(missing_geometry_rows, start=1):
-        raw_label = s3.get_bytes(sample.label_key)
-        instances = []
-        if raw_label:
-            with scratch_file(suffix=".txt", data=raw_label) as label_path:
-                instances = parse_label_file(
-                    path=label_path,
-                    class_names=class_names,
-                    task=task,
-                )
-            annotation_repo.replace_sample_annotations(
-                sample_id=sample.id,
-                class_ids=[instance.class_id for instance in instances],
-                user_id=None,
-                commit=False,
-            )
-        annotations = [
-            item.model_dump(mode="json")
-            for item in instances_to_dtos(instances, task)
-        ]
-        sample_repo.set_geometries(sample.id, annotations, commit=False)
-        if index % 100 == 0:
-            sample_repo.commit()
-    if missing_geometry_rows:
-        sample_repo.commit()
 
     total, rows = sample_repo.paginate_gallery(
         dataset_id=dataset_id,
@@ -125,12 +100,6 @@ def list_gallery_samples(
                     item.model_dump(mode="json")
                     for item in instances_to_dtos(instances, task)
                 ]
-                sample_repo.set_geometries(row.id, annotations)
-                annotation_repo.replace_sample_annotations(
-                    sample_id=row.id,
-                    class_ids=[instance.class_id for instance in instances],
-                    user_id=None,
-                )
 
         per_class_counts = Counter(
             item["class_id"] for item in annotations
@@ -201,16 +170,13 @@ async def import_dataset_zip(dataset_id: int,
             detail="Загрузите ZIP-архив с датасетом",
         )
 
-    zip_bytes = await file.read()
-    file_descriptor, zip_path = tempfile.mkstemp(prefix="hub_import_", suffix=".zip")
+    zip_path = await spool_upload(file)
     try:
-        with os.fdopen(file_descriptor, "wb") as saved_file:
-            saved_file.write(zip_bytes)
         import_record = import_job_repo.create(user_id=user.id, dataset_id=dataset_id)
         background_tasks.add_task(
             run_existing_dataset_import,
             import_id=import_record.id,
-            zip_path=zip_path,
+            zip_path=str(zip_path),
             dataset_id=dataset_id,
             task=dataset.task,
         )
@@ -239,7 +205,10 @@ def get_upload_url(dataset_id: int,
                    user: CurrentUser = Depends(require_dataset_role({"owner"})),
                    s3: S3Client = Depends(get_s3_client)) -> UploadUrlResponse:
     """Выдаёт presigned PUT ссылку для прямой загрузки кадра во временный префикс S3."""
-    raw_key = f"datasets/{dataset_id}/_incoming/{req.split.lower()}/{req.filename}"
+    try:
+        raw_key = incoming_key(dataset_id, req.split, req.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
     url = s3.get_presigned_upload_url(key=raw_key, content_type=req.content_type)
     return UploadUrlResponse(upload_key=raw_key, upload_url=url)
 
@@ -258,12 +227,27 @@ def complete_upload(
     Завершает загрузку одиночного кадра:
     конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.
     """
+    prefix = f"datasets/{int(dataset_id)}/_incoming/"
+    if not isinstance(req.upload_key, str) or not req.upload_key.startswith(prefix):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный ключ загрузки")
+    rest = req.upload_key[len(prefix):]
+    parts = rest.split("/")
+    if len(parts) != 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный ключ загрузки")
+    try:
+        split_name = clean_split(parts[0])
+        clean_filename(parts[1])
+        if split_name != clean_split(req.split):
+            raise ValueError("Некорректный split")
+        s3.safe_path(req.upload_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
+
     raw_bytes = s3.get_bytes(req.upload_key)
     if not raw_bytes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Загруженный файл не найден в S3")
 
     orig_name = Path(req.upload_key).name
-    split_name = req.split.lower()
 
     with scratch_file(suffix=Path(orig_name).suffix, data=raw_bytes) as tmp_src:
         img_bytes, norm_filename, content_type = normalize_image_file(tmp_src)
