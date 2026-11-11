@@ -1,17 +1,10 @@
 ﻿# core/domain/enums.py
+
+import logging
 from enum import Enum
 
 
-class TaskTypeEnum(str, Enum):
-    DETECT = "detect"
-    OBB = "obb"
-    SEGMENT = "segment"
-
-
-class SplitEnum(str, Enum):
-    TRAIN = "train"
-    VAL = "val"
-    TEST = "test"
+logger = logging.getLogger(__name__)
 
 
 class RoleEnum(str, Enum):

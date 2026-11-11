@@ -1,17 +1,26 @@
 # core/application/import_service.py
-import shutil
-from pathlib import Path
-from typing import Any, List
 
 import yaml
+import shutil
+import logging
+from pathlib import Path
+from typing import Any, Callable, List
 from acmenra_cv import TaskType
-from acmenra_ds import Config, Dataset, DatasetLayout, DataSplit
 
-from core.infrastructure.cv.labels import build_category_enum, parse_label_file
-from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.media.convert import normalize_image_file
+from acmenra_ds import Config, DatasetLayout, DataSplit
+from acmenra_ds.data.sample import Sample
+
+from core.infrastructure.cv.labels import parse_label_file
+from core.infrastructure.cv.mapper import instances_to_dtos
+from core.infrastructure.cv.thumbs import read_image_unicode, render_thumbnail_bytes
+
+from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+
+logger = logging.getLogger(__name__)
+
 
 STORAGE_DIR = Path("storage")
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
@@ -53,11 +62,26 @@ def find_yaml_file(root: Path) -> Path | None:
     return yaml_files[0] if yaml_files else None
 
 
-def build_acmenra_dataset(
-    root: Path,
-    task: TaskType,
-    fallback_names: List[str] | None = None,
-) -> Dataset:
+def normalize_dataset_images(root: Path) -> None:
+    for source_path in root.rglob("*"):
+        if not source_path.is_file() or source_path.suffix.lower() not in CONVERT_EXTENSIONS:
+            continue
+
+        image_bytes, normalized_name, _ = normalize_image_file(source_path)
+        normalized_path = source_path.with_name(normalized_name)
+        if normalized_path.exists():
+            raise ValueError(
+                f"Невозможно нормализовать {source_path.name}: "
+                f"файл {normalized_path.name} уже существует"
+            )
+
+        normalized_path.write_bytes(image_bytes)
+        source_path.unlink()
+
+
+def build_acmenra_dataset(root: Path,
+                          task: TaskType,
+                          fallback_names: List[str] | None = None) -> Config:
     root = resolve_dataset_root(root)
     yaml_path = find_yaml_file(root)
 
@@ -81,8 +105,14 @@ def build_acmenra_dataset(
     if not names:
         names = ["object"]
 
-    category_enum = build_category_enum(names)
     layout = detect_layout(root)
+    val_leaf = (
+        "valid"
+        if (root / "valid").is_dir() or (root / "images" / "valid").is_dir()
+        else "val"
+    )
+    has_val = (root / val_leaf).is_dir() or (root / "images" / val_leaf).is_dir()
+    has_test = (root / "test").is_dir() or (root / "images" / "test").is_dir()
 
     task_str = raw_cfg.get("task")
     try:
@@ -93,58 +123,123 @@ def build_acmenra_dataset(
     # Передаем конфигурацию напрямую в acmenra-ds, без ручных симлинков
     config = Config(
         root=root,
+        train="train",
+        val=val_leaf if has_val else None,
+        test="test" if has_test else None,
         names=names,
         task=resolved_task,
         layout=layout,
+        val_leaf=val_leaf,
     )
 
-    return Dataset(config=config, category=category_enum, is_cache=False, is_strict=False)
+    return config
+
+
+def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
+    if split == DataSplit.TRAIN:
+        image_dir = config.get_train_images()
+        label_dir = config.get_train_labels()
+    elif split == DataSplit.VAL:
+        image_dir = config.get_val_images()
+        label_dir = config.get_val_labels()
+    else:
+        image_dir = config.get_test_images()
+        label_dir = config.get_test_labels()
+
+    if image_dir is None or not image_dir.is_dir():
+        return []
+
+    samples = []
+    for image_path in sorted(image_dir.iterdir()):
+        if not image_path.is_file() or image_path.suffix.lower() not in {
+            ".jpg", ".jpeg", ".png",
+        }:
+            continue
+
+        frame = read_image_unicode(image_path)
+        if frame is None or min(frame.shape[:2]) <= 1:
+            continue
+
+        label_path = label_dir / f"{image_path.stem}.txt" if label_dir else None
+        samples.append(Sample(
+            stem=image_path.stem,
+            image_path=image_path,
+            label_path=label_path if label_path and label_path.is_file() else None,
+        ))
+
+    return samples
 
 
 class ImportService:
-    def __init__(self, s3_client: Any, sample_repo: Any, class_repo: Any):
+    def __init__(
+        self,
+        s3_client: Any,
+        sample_repo: Any,
+        class_repo: Any,
+        annotation_repo: Any | None = None,
+    ):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo
+        self.annotations = annotation_repo
 
-    def import_zip(
-        self,
-        dataset_id: int,
-        task: TaskType,
-        zip_source: bytes | Path,
-        existing_classes: List[str] | None = None,
-    ) -> dict:
+    def import_zip(self,
+                   dataset_id: int,
+                   task: TaskType,
+                   zip_source: bytes | Path,
+                   existing_classes: List[str] | None = None,
+                   progress_callback: Callable[..., None] | None = None) -> dict:
         imported_count = 0
         errors_count = 0
+        processed_count = 0
+        total_samples = 0
+
+        def report(stage: str, progress: int) -> None:
+            if progress_callback is not None:
+                progress_callback(
+                    stage=stage,
+                    progress=progress,
+                    total_samples=total_samples,
+                    processed_samples=processed_count,
+                    imported_samples=imported_count,
+                    parse_errors=errors_count,
+                )
 
         with scratch_dir(prefix=f"import_ds_{dataset_id}_") as tmp_dir:
+            report("extracting", 2)
             raw_root = extract_zip_safely(zip_source, tmp_dir)
             root = resolve_dataset_root(raw_root)
+            report("normalizing", 8)
+            normalize_dataset_images(root)
 
+            report("copying", 14)
             persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
             if persistent_raw_dir.exists():
                 shutil.rmtree(persistent_raw_dir, ignore_errors=True)
             persistent_raw_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(root, persistent_raw_dir, dirs_exist_ok=True)
+            report("discovering", 18)
 
-            ds = build_acmenra_dataset(root=persistent_raw_dir, task=task, fallback_names=existing_classes)
-            class_names = ds.names or existing_classes or []
+            config = build_acmenra_dataset(
+                root=persistent_raw_dir,
+                task=task,
+                fallback_names=existing_classes,
+            )
+            class_names = config.names or existing_classes or []
 
             if class_names and self.classes is not None:
                 self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
 
-            for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST):
-                try:
-                    split_obj = ds.split(split_enum)
-                except Exception:
-                    continue
+            split_samples = [
+                (split_enum, split_enum.value.lower(), load_split_samples(config, split_enum))
+                for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST)
+            ]
+            total_samples = sum(len(samples) for _, _, samples in split_samples)
+            report("importing", 20)
+            progress_interval = max(1, (total_samples + 99) // 100)
 
-                if split_obj is None:
-                    continue
-
-                split_name = split_enum.value.lower()
-
-                for idx, sample in enumerate(split_obj.samples):
+            for _, split_name, samples in split_samples:
+                for idx, sample in enumerate(samples):
                     parse_error: str | None = None
                     instances = []
 
@@ -187,7 +282,7 @@ class ImportService:
                     self.s3.put_bytes(s3_lbl_key, raw_txt, content_type="text/plain")
 
                     if self.samples is not None:
-                        self.samples.create_sample(
+                        created_sample = self.samples.create_sample(
                             dataset_id=dataset_id,
                             stem=sample.stem,
                             split=split_name,
@@ -196,13 +291,45 @@ class ImportService:
                             thumb_key=s3_thb_key,
                             is_labeled=bool(instances),
                             parse_error=parse_error,
+                            status=(
+                                "accepted"
+                                if instances and parse_error is None
+                                else "unlabeled"
+                            ),
                         )
+                        if self.annotations is not None:
+                            self.annotations.replace_sample_annotations(
+                                sample_id=created_sample.id,
+                                class_ids=[instance.class_id for instance in instances],
+                                user_id=None,
+                                commit=False,
+                            )
+                        self.samples.set_geometries(
+                            sample_id=created_sample.id,
+                            geometries=[
+                                item.model_dump(mode="json")
+                                for item in instances_to_dtos(instances, task)
+                            ],
+                            commit=False,
+                        )
+                        self.samples.commit()
 
                     imported_count += 1
+                    processed_count += 1
+                    if (
+                        processed_count % progress_interval == 0
+                        or processed_count == total_samples
+                    ):
+                        report(
+                            "importing",
+                            20 + int(processed_count * 75 / max(1, total_samples)),
+                        )
 
+            report("finalizing", 98)
         return {
             "dataset_id": dataset_id,
             "imported_samples": imported_count,
+            "total_samples": total_samples,
             "parse_errors": errors_count,
             "classes": class_names,
             "local_gallery_ready": True,

@@ -1,11 +1,17 @@
 # core/infrastructure/cv/thumbs.py
+
+import cv2
+import logging
+import numpy as np
 from pathlib import Path
 from typing import List
 
-import cv2
-import numpy as np
 from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 from acmenra_ds import ImageParser
+
+
+logger = logging.getLogger(__name__)
+
 
 # Контрастная палитра для раскраски классов (RGB/BGR кортежи)
 DEFAULT_PALETTE: List[tuple] = [
@@ -62,12 +68,10 @@ def build_default_style() -> Style:
     )
 
 
-def render_thumbnail_array(
-    frame: np.ndarray,
-    instances: List[Instance],
-    task: TaskType,
-    style: Style | None = None,
-) -> np.ndarray:
+def render_thumbnail_array(frame: np.ndarray,
+                           instances: List[Instance],
+                           task: TaskType,
+                           style: Style | None = None) -> np.ndarray:
     """
     Рисует инстансы (бокс, OBB или полигон) на матрице изображения через Drawer.
     Возвращает копию кадра без изменений, если список инстансов пуст.
@@ -89,12 +93,10 @@ def render_thumbnail_array(
     )
 
 
-def render_thumbnail_bytes(
-    image_path: Path,
-    instances: List[Instance],
-    task: TaskType,
-    jpeg_quality: int = 85,
-) -> bytes:
+def render_thumbnail_bytes(image_path: Path,
+                           instances: List[Instance],
+                           task: TaskType,
+                           jpeg_quality: int = 85,) -> bytes:
     """
     Читает изображение (с поддержкой Unicode-путей и фоллбэком на ImageParser),
     рисует маски через Drawer и возвращает готовые JPEG-байты для загрузки в S3.

@@ -1,4 +1,7 @@
 # apps/api/app/deps.py
+
+import logging
+from datetime import datetime, timezone
 from typing import Callable, Set
 
 from fastapi import Depends, HTTPException, status
@@ -7,11 +10,23 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from core.application.annotation_service import AnnotationService
 from core.application.auth_service import AuthService
 from core.application.dataset_service import DatasetService
+from core.application.dataset_statistics_service import DatasetStatisticsService
 from core.application.export_service import ExportService
+from core.application.invitation_notification_service import (
+    InvitationNotificationService,
+)
+from core.application.membership_service import MembershipService
 from core.application.import_service import ImportService
-from core.infrastructure.auth.tokens import decode_access_token
+from core.application.lock_service import LockService
+from core.application.review_service import ReviewService
+from core.infrastructure.auth.tokens import decode_access_claims
+from core.infrastructure.email.smtp import SMTPEmailService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.sql.base import get_db
+
+
+logger = logging.getLogger(__name__)
+
 
 security = HTTPBearer()
 
@@ -23,6 +38,14 @@ _s3_client = S3Client()
 
 def get_s3_client() -> S3Client:
     return _s3_client
+
+
+def get_email_service() -> SMTPEmailService:
+    return SMTPEmailService.from_env()
+
+
+def get_invitation_notification_service() -> InvitationNotificationService:
+    return InvitationNotificationService(email_service=get_email_service)
 
 
 def get_db_connection():
@@ -62,29 +85,53 @@ def get_membership_repo(db=Depends(get_db_connection)):
     return MembershipRepository(db)
 
 
+def get_notification_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.notifications import NotificationRepository
+    return NotificationRepository(db)
+
+
 def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
+
+def get_import_job_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.import_jobs import ImportJobRepository
+    return ImportJobRepository(db)
+
+def get_event_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.events import EventRepository
+    return EventRepository(db)
+
+
+def get_auth_token_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.auth_tokens import AuthTokenRepository
+    return AuthTokenRepository(db)
 
 
 # --- Аутентификация ---
 
 class CurrentUser:
-    def __init__(self, id: int):
+    def __init__(self, id: int, jti: str, access_expires_at):
         self.id = id
+        self.jti = jti
+        self.access_expires_at = access_expires_at
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> CurrentUser:
-    """Декодирует JWT из заголовка Authorization и возвращает текущего пользователя."""
-    user_id = decode_access_token(credentials.credentials)
-    if not user_id:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security),
+                     token_repo=Depends(get_auth_token_repo)) -> CurrentUser:
+    """Декодирует JWT и отвергает отозванный access-токен."""
+    claims = decode_access_claims(credentials.credentials)
+    if not claims or token_repo.is_access_revoked(claims["jti"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return CurrentUser(id=user_id)
+    return CurrentUser(
+        id=int(claims["sub"]),
+        jti=claims["jti"],
+        access_expires_at=datetime.fromtimestamp(claims["exp"], tz=timezone.utc),
+    )
 
 
 # --- Авторизация ---
@@ -110,11 +157,9 @@ def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     return role_dependency
 
 
-def get_dataset_or_404(
-    dataset_id: int,
-    user: CurrentUser = Depends(get_current_user),
-    dataset_repo=Depends(get_dataset_repo),
-):
+def get_dataset_or_404(dataset_id: int,
+                       user: CurrentUser = Depends(get_current_user),
+                       dataset_repo=Depends(get_dataset_repo)):
     """Проверяет существование датасета (защита от IDOR)."""
     dataset = dataset_repo.get_by_id(dataset_id=dataset_id)
     if dataset is None:
@@ -127,19 +172,54 @@ def get_dataset_or_404(
 
 # --- Сервисы (Application layer) ---
 
-def get_auth_service(user_repo=Depends(get_user_repo)) -> AuthService:
-    return AuthService(user_repo=user_repo)
+def get_auth_service(user_repo=Depends(get_user_repo),
+                     token_repo=Depends(get_auth_token_repo)) -> AuthService:
+    return AuthService(user_repo=user_repo, token_repo=token_repo)
 
 
-def get_dataset_service(
-    dataset_repo=Depends(get_dataset_repo),
-    class_repo=Depends(get_class_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> DatasetService:
+def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
+                        class_repo=Depends(get_class_repo),
+                        membership_repo=Depends(get_membership_repo),
+                        sample_repo=Depends(get_sample_repo)) -> DatasetService:
     return DatasetService(
         dataset_repo=dataset_repo,
         class_repo=class_repo,
         membership_repo=membership_repo,
+        sample_repo=sample_repo,
+    )
+
+
+def get_dataset_statistics_service(
+    sample_repo=Depends(get_sample_repo),
+    class_repo=Depends(get_class_repo),
+    s3: S3Client = Depends(get_s3_client),
+) -> DatasetStatisticsService:
+    return DatasetStatisticsService(
+        sample_repo=sample_repo,
+        class_repo=class_repo,
+        s3_client=s3,
+    )
+
+
+def get_membership_service(
+    membership_repo=Depends(get_membership_repo),
+    notification_repo=Depends(get_notification_repo),
+) -> MembershipService:
+    return MembershipService(
+        membership_repo=membership_repo,
+        notification_repo=notification_repo,
+    )
+
+
+def get_lock_service(
+    sample_repo=Depends(get_sample_repo),
+    membership_repo=Depends(get_membership_repo),
+    event_repo=Depends(get_event_repo),
+) -> LockService:
+    return LockService(
+        sample_repo=sample_repo,
+        membership_repo=membership_repo,
+        event_repo=event_repo,
     )
 
 
@@ -147,17 +227,21 @@ def get_import_service(
     s3: S3Client = Depends(get_s3_client),
     sample_repo=Depends(get_sample_repo),
     class_repo=Depends(get_class_repo),
-) -> ImportService:
-    return ImportService(s3_client=s3, sample_repo=sample_repo, class_repo=class_repo)
-
-
-def get_annotation_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
     annotation_repo=Depends(get_annotation_repo),
-    class_repo=Depends(get_class_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> AnnotationService:
+) -> ImportService:
+    return ImportService(
+        s3_client=s3,
+        sample_repo=sample_repo,
+        class_repo=class_repo,
+        annotation_repo=annotation_repo,
+    )
+
+
+def get_annotation_service(s3: S3Client = Depends(get_s3_client),
+                           sample_repo=Depends(get_sample_repo),
+                           annotation_repo=Depends(get_annotation_repo),
+                           class_repo=Depends(get_class_repo),
+                           membership_repo=Depends(get_membership_repo)) -> AnnotationService:
     return AnnotationService(
         s3_client=s3,
         sample_repo=sample_repo,
@@ -167,17 +251,25 @@ def get_annotation_service(
     )
 
 
-def get_export_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    export_repo=Depends(get_export_repo),
-    membership_repo=Depends(get_membership_repo),
-) -> ExportService:
+def get_export_service(s3: S3Client = Depends(get_s3_client),
+                       sample_repo=Depends(get_sample_repo),
+                       class_repo=Depends(get_class_repo),
+                       export_repo=Depends(get_export_repo),
+                       membership_repo=Depends(get_membership_repo)) -> ExportService:
     return ExportService(
         s3_client=s3,
         sample_repo=sample_repo,
         class_repo=class_repo,
         export_repo=export_repo,
         membership_repo=membership_repo,
+    )
+
+
+def get_review_service(sample_repo=Depends(get_sample_repo),
+                       membership_repo=Depends(get_membership_repo),
+                       event_repo=Depends(get_event_repo)) -> ReviewService:
+    return ReviewService(
+        sample_repo=sample_repo,
+        membership_repo=membership_repo,
+        event_repo=event_repo,
     )

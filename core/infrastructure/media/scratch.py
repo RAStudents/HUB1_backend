@@ -1,11 +1,29 @@
 # core/infrastructure/media/scratch.py
+
 import os
 import shutil
-import tempfile
 import zipfile
-from contextlib import contextmanager
+import logging
+import tempfile
+
 from pathlib import Path
 from typing import Iterator
+from contextlib import contextmanager
+
+
+logger = logging.getLogger(__name__)
+
+
+def _scratch_root() -> Path:
+    if os.name == "nt":
+        windows_temp = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "Temp"
+        if windows_temp.is_dir() and str(windows_temp).isascii():
+            return windows_temp
+        raise OSError(
+            "Не удалось найти временную папку с ASCII-путём. "
+            "Экспорт датасета не может быть проверен OpenCV по Unicode-пути."
+        )
+    return Path(tempfile.gettempdir())
 
 
 @contextmanager
@@ -14,7 +32,7 @@ def scratch_dir(prefix: str = "hub_") -> Iterator[Path]:
     Создаёт временную директорию и гарантированно удаляет её при выходе из блока with.
     Используется для распаковки zip-архивов и сборки экспортов.
     """
-    tmp_path = Path(tempfile.mkdtemp(prefix=prefix))
+    tmp_path = Path(tempfile.mkdtemp(prefix=prefix, dir=_scratch_root()))
     try:
         yield tmp_path
     finally:
@@ -22,7 +40,8 @@ def scratch_dir(prefix: str = "hub_") -> Iterator[Path]:
 
 
 @contextmanager
-def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
+def scratch_file(suffix: str = "",
+                 data: bytes | None = None) -> Iterator[Path]:
     """
     Создаёт временный файл и удаляет его при выходе из блока with.
     Если передан data — записывает байты сразу после создания файла.
@@ -40,7 +59,8 @@ def scratch_file(suffix: str = "", data: bytes | None = None) -> Iterator[Path]:
         path.unlink(missing_ok=True)
 
 
-def extract_zip_safely(zip_bytes_or_path: bytes | Path, dest_dir: Path) -> Path:
+def extract_zip_safely(zip_bytes_or_path: bytes | Path,
+                       dest_dir: Path) -> Path:
     """
     Распаковывает ZIP-архив в dest_dir с защитой от Zip Slip-атаки.
 

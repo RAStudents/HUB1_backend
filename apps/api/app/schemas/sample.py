@@ -1,7 +1,19 @@
 # apps/api/app/schemas/sample.py
+
+import logging
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from apps.api.app.schemas.annotation import AnnotationItemDTO
+
+
+class GalleryClassDTO(BaseModel):
+    id: int
+    name: str
+    count: int
+
+logger = logging.getLogger(__name__)
 
 
 class UploadUrlRequest(BaseModel):
@@ -22,6 +34,7 @@ class CompleteUploadRequest(BaseModel):
 
 class SampleCardDTO(BaseModel):
     id: int
+    sample_id: Optional[int] = None
     dataset_id: int
     stem: str
     split: str
@@ -29,6 +42,11 @@ class SampleCardDTO(BaseModel):
     is_labeled: bool
     image_url: str          # покой — чистый кадр
     thumb_url: str          # hover — тумба с масками (Drawer)
+    filename: str = ""
+    task: str = ""
+    objects_count: int = 0
+    annotation_classes: List[GalleryClassDTO] = Field(default_factory=list)
+    annotations: List[AnnotationItemDTO] = Field(default_factory=list)
     lock_user: Optional[int] = None
     lock_until: Optional[datetime] = None
     parse_error: Optional[str] = None
@@ -38,4 +56,8 @@ class GalleryPageDTO(BaseModel):
     total: int
     page: int
     page_size: int
-    items: List[SampleCardDTO]
+    task: str = ""
+    labeled_count: int = 0
+    unlabeled_count: int = 0
+    classes: List[GalleryClassDTO] = Field(default_factory=list)
+    items: List[SampleCardDTO] = Field(default_factory=list)

@@ -1,5 +1,10 @@
 # core/infrastructure/sql/repos/annotations.py
+
+import logging
 from core.infrastructure.sql.schema import annotations_table
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnnotationRepository:
@@ -10,7 +15,8 @@ class AnnotationRepository:
         self,
         sample_id: int,
         class_ids: list[int],
-        user_id: int,
+        user_id: int | None,
+        commit: bool = True,
     ) -> None:
         """
         Атомарно заменяет аннотации кадра:
@@ -21,13 +27,18 @@ class AnnotationRepository:
                 annotations_table.c.sample_id == sample_id
             )
         )
-        for class_id in class_ids:
+        if class_ids:
             self.db.execute(
-                annotations_table.insert().values(
-                    sample_id=sample_id,
-                    class_id=class_id,
-                    created_by=user_id,
-                    updated_by=user_id,
-                )
+                annotations_table.insert(),
+                [
+                    {
+                        "sample_id": sample_id,
+                        "class_id": class_id,
+                        "created_by": user_id,
+                        "updated_by": user_id,
+                    }
+                    for class_id in class_ids
+                ],
             )
-        self.db.commit()
+        if commit:
+            self.db.commit()

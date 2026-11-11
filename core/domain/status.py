@@ -1,5 +1,10 @@
 ﻿# core/domain/status.py
+
+import logging
 from core.domain.enums import SampleStatusEnum
+
+
+logger = logging.getLogger(__name__)
 
 
 class StatusTransitionValidator:
@@ -12,7 +17,9 @@ class StatusTransitionValidator:
     }
 
     @classmethod
-    def can_transition(cls, current: SampleStatusEnum, target: SampleStatusEnum) -> bool:
+    def can_transition(cls,
+                       current: SampleStatusEnum,
+                       target: SampleStatusEnum) -> bool:
         if current == target:
             return True
         return target in cls.ALLOWED_TRANSITIONS.get(current, set())

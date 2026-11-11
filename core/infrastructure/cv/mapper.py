@@ -1,8 +1,13 @@
 # core/infrastructure/cv/mapper.py
+
 import math
+import logging
+from enum import EnumMeta
 from typing import List, Sequence
 
 from acmenra_cv import Box, Instance, Obb, Point, Polygon, TaskType
+from acmenra_ds import make_category_enum
+
 from apps.api.app.schemas.annotation import (
     AnnotationItemDTO,
     BoxDTO,
@@ -10,10 +15,13 @@ from apps.api.app.schemas.annotation import (
     PointDTO,
     PolygonDTO,
 )
-from core.infrastructure.cv.labels import build_category_enum
 
 
-def instance_to_dto(instance: Instance, task: TaskType) -> AnnotationItemDTO:
+logger = logging.getLogger(__name__)
+
+
+def instance_to_dto(instance: Instance,
+                    task: TaskType) -> AnnotationItemDTO:
     """
     Конвертирует Instance из acmenra-cv в DTO для API.
 
@@ -51,18 +59,17 @@ def instance_to_dto(instance: Instance, task: TaskType) -> AnnotationItemDTO:
     )
 
 
-def dto_to_instance(
-    dto: AnnotationItemDTO,
-    task: TaskType,
-    class_names: Sequence[str],
-) -> Instance:
+def dto_to_instance(dto: AnnotationItemDTO,
+                    task: TaskType,
+                    class_names: Sequence[str],
+                    category: EnumMeta | None = None) -> Instance:
     """
     Собирает Instance из DTO фронтенда для сохранения в .txt и отрисовки Drawer-ом.
 
     - Для OBB и SEGMENT создаёт технический пустой Box() (требование конструктора Instance).
     - Угол OBB переводится из градусов в радианы.
     """
-    category_enum = build_category_enum(class_names)
+    category_enum = category or make_category_enum(class_names)
     members_by_val = {item.value: item for item in category_enum}
     label_enum = members_by_val.get(dto.class_id, list(category_enum)[0])
     placeholder_box = Box()
@@ -110,15 +117,15 @@ def dto_to_instance(
     raise ValueError(f"Некорректные данные геометрии для задачи {task.value}")
 
 
-def instances_to_dtos(instances: List[Instance], task: TaskType) -> List[AnnotationItemDTO]:
+def instances_to_dtos(instances: List[Instance],
+                      task: TaskType) -> List[AnnotationItemDTO]:
     """Конвертирует список Instance в список DTO."""
     return [instance_to_dto(inst, task) for inst in instances]
 
 
-def dtos_to_instances(
-    dtos: List[AnnotationItemDTO],
-    task: TaskType,
-    class_names: Sequence[str],
-) -> List[Instance]:
+def dtos_to_instances(dtos: List[AnnotationItemDTO],
+                      task: TaskType,
+                      class_names: Sequence[str],
+                      category: EnumMeta | None = None) -> List[Instance]:
     """Конвертирует список DTO в список Instance."""
-    return [dto_to_instance(d, task, class_names) for d in dtos]
+    return [dto_to_instance(d, task, class_names, category) for d in dtos]

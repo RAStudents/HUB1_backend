@@ -1,19 +1,23 @@
 ﻿# core/domain/dataset.py
+
+import logging
 from datetime import datetime, timezone
-from core.domain.enums import TaskTypeEnum
+
+from acmenra_cv import TaskType
+
+
+logger = logging.getLogger(__name__)
 
 
 class Dataset:
-    def __init__(
-        self,
-        id: int | None,
-        name: str,
-        task: TaskTypeEnum,
-        owner_id: int,
-        description: str | None = None,
-        is_private: bool = True,
-        created_at: datetime | None = None,
-    ):
+    def __init__(self,
+                 id: int | None,
+                 name: str,
+                 task: TaskType,
+                 owner_id: int,
+                 description: str | None = None,
+                 is_private: bool = True,
+                 created_at: datetime | None = None):
         self.id = id
         self.name = name
         self.task = task
@@ -33,13 +37,13 @@ class Dataset:
         self._name = value.strip()
 
     @property
-    def task(self) -> TaskTypeEnum:
+    def task(self) -> TaskType:
         return self._task
 
     @task.setter
-    def task(self, value: TaskTypeEnum | str) -> None:
+    def task(self, value: TaskType | str) -> None:
         if isinstance(value, str):
-            value = TaskTypeEnum(value.lower())
-        if not isinstance(value, TaskTypeEnum):
+            value = TaskType(value.lower())
+        if not isinstance(value, TaskType):
             raise TypeError("Некорректный тип задачи датасета")
         self._task = value

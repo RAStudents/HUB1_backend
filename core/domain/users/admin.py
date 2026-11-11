@@ -1,8 +1,12 @@
 # core/domain/users/admin.py
 
+import logging
 from typing import Optional
 
 from core.domain.users.user import User
+
+
+logger = logging.getLogger(__name__)
 
 
 class Admin(User):

@@ -159,6 +159,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local dataset storage
+/local_s3_storage/
+/storage/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -218,3 +222,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+*.db
+test/

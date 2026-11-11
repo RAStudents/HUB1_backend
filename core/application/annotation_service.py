@@ -1,27 +1,31 @@
 # core/application/annotation_service.py
-from datetime import datetime, timezone
+
+import logging
 from pathlib import Path
 from typing import Any, List
-
 from acmenra_cv import TaskType
-from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
+from datetime import datetime, timezone
+
+from core.infrastructure.media.scratch import scratch_file
+from core.infrastructure.cv.thumbs import render_thumbnail_bytes
+from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 from core.infrastructure.cv.labels import parse_label_file, write_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
-from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.media.scratch import scratch_file
-from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+
+from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnnotationService:
-    def __init__(
-        self,
-        s3_client: Any,
-        sample_repo: Any,
-        annotation_repo: Any,
-        class_repo: Any,
-        membership_repo: Any,
-        event_repo: Any | None = None,
-    ):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 annotation_repo: Any,
+                 class_repo: Any,
+                 membership_repo: Any,
+                 event_repo: Any | None = None):
         self.s3 = s3_client
         self.samples = sample_repo
         self.annotations = annotation_repo
@@ -29,13 +33,11 @@ class AnnotationService:
         self.memberships = membership_repo
         self.events = event_repo
 
-    def get_frame_annotations(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        task: TaskType,
-    ) -> FrameAnnotationsDTO:
+    def get_frame_annotations(self,
+                              dataset_id: int,
+                              sample_id: int,
+                              user_id: int,
+                              task: TaskType) -> FrameAnnotationsDTO:
         """
         Возвращает разметку кадра фронтенду:
         проверяет доступ → скачивает .txt из S3 → парсит через acmenra-cv → возвращает DTO.
@@ -68,14 +70,12 @@ class AnnotationService:
         dtos = instances_to_dtos(instances=instances, task=task)
         return FrameAnnotationsDTO(sample_id=sample_id, items=dtos)
 
-    def save_frame_annotations(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        task: TaskType,
-        items: List[AnnotationItemDTO],
-    ) -> FrameAnnotationsDTO:
+    def save_frame_annotations(self,
+                               dataset_id: int,
+                               sample_id: int,
+                               user_id: int,
+                               task: TaskType,
+                               items: List[AnnotationItemDTO]) -> FrameAnnotationsDTO:
         """
         Сохраняет разметку из редактора:
         1. Проверяет роль (owner | labeler) и активный lock на кадре.
@@ -90,9 +90,14 @@ class AnnotationService:
         sample = self.samples.get_by_id(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
             raise LookupError("Кадр не найден")
+        if role == "labeler" and sample.status != "in_progress":
+            raise PermissionError("Разметчик может изменять только кадр в работе")
 
         now = datetime.now(timezone.utc)
-        lock_expired = sample.lock_until and sample.lock_until < now
+        lock_until = sample.lock_until
+        if lock_until is not None and lock_until.tzinfo is None:
+            lock_until = lock_until.replace(tzinfo=timezone.utc)
+        lock_expired = lock_until and lock_until < now
         if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
 
@@ -143,12 +148,20 @@ class AnnotationService:
                 class_ids=[inst.class_id for inst in instances],
                 user_id=user_id,
             )
+        self.samples.set_geometries(
+            sample_id=sample_id,
+            geometries=[
+                item.model_dump(mode="json")
+                for item in instances_to_dtos(instances=instances, task=task)
+            ],
+        )
 
         self.samples.mark_updated(
             sample_id=sample_id,
             is_labeled=bool(instances),
             parse_error=None,
         )
+        self.samples.set_status(sample_id=sample_id, status="in_progress")
 
         if self.events is not None:
             self.events.log(
