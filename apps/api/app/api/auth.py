@@ -83,7 +83,7 @@ def _profile_with_avatar(profile: dict[str, Any],
         version = hashlib.sha256(avatar_bytes).hexdigest()[:12]
         avatar_url = (
             f"{s3.get_presigned_url(user_avatar_key(user_id), base_url=str(request.base_url))}"
-            f"?v={version}"
+            f"&v={version}"
         )
     return {**profile, "avatar_url": avatar_url}
 
