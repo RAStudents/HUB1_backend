@@ -13,6 +13,11 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+MAX_ZIP_FILES = 2_000_000
+MAX_ZIP_BYTES = 5 * 1024 * 1024 * 1024
+_SYMLINK_MODE = 0o120000
+
+
 
 def _scratch_root() -> Path:
     if os.name == "nt":
@@ -57,11 +62,6 @@ def scratch_file(suffix: str = "",
         yield path
     finally:
         path.unlink(missing_ok=True)
-
-
-MAX_ZIP_FILES = 20_000
-MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024
-_SYMLINK_MODE = 0o120000
 
 
 def _is_symlink(member: zipfile.ZipInfo) -> bool:
