@@ -20,7 +20,8 @@ hub/
         auth.py                      # регистрация, логин, callback Яндекса, я, выход
         datasets.py                  # создать, мои, доступные мне, удалить
         classes.py                   # имена классов, правка индекса только с подтверждением
-        members.py                   # инвайт по email, роль, список участников
+        members.py                   # список участников, добавление зарегистрированных по email, смена роли, удаление
+        notifications.py             # список уведомлений, отметка прочитанного
         samples.py                   # выдача upload-url, завершение загрузки, галерея, удаление
         annotations.py               # отдать разметку кадра и принять сохранение
         locks.py                     # взять, продлить, отпустить, снять владельцем
@@ -32,6 +33,7 @@ hub/
         sample.py
         annotation.py                # нормализованный box / obb / polygon, как отдал cv
         member.py
+        notification.py
         export.py
 
   apps/web/
@@ -73,7 +75,8 @@ hub/
 
   core/application/
     auth_service.py                  # почта и Яндекс: один человек — один user
-    dataset_service.py               # датасет, классы, инвайт, проверка роли
+    dataset_service.py               # датасет и классы
+    membership_service.py            # добавление участников и управление ролями
     upload_service.py                # догрузить байты, сконвертировать, завести сэмпл
     import_service.py                # zip: угадать раскладку, разложить объекты в S3 и строки в БД
     annotation_service.py            # save/get: роль, lock, cv, затем S3 и Postgres
@@ -86,11 +89,12 @@ hub/
       base.py                        # текущий DataBase
       table.py                       # текущий Table
       enums.py                       # DBType, Status
-      schema.py                      # users, datasets, classes, memberships, samples, annotations, events, exports
+      schema.py                      # users, datasets, classes, memberships, samples, annotations, events, notifications, exports
       repos/users.py
       repos/datasets.py
       repos/classes.py
-      repos/memberships.py
+      repos/memberships.py             # owner | labeler | observer; владелец неизменяем
+      repos/notifications.py
       repos/samples.py
       repos/annotations.py
       repos/events.py
@@ -131,4 +135,6 @@ SMTP_SECURITY=starttls
 SMTP_TIMEOUT_SECONDS=10
 ```
 
-`SMTP_SECURITY` принимает `starttls` (по умолчанию), `ssl` или `none`; для `ssl` порт по умолчанию `465`, для остальных режимов — `587`. Логин и пароль можно не задавать для SMTP-сервера без авторизации. Если SMTP не настроен, приложение запускается, но вызов отправки завершится понятной ошибкой. Сервис доступен в API через `get_email_service` из `apps.api.app.deps`; прикладной сценарий должен вызвать `send_email(to_email, subject, body)`.
+`SMTP_SECURITY` принимает `starttls` (по умолчанию), `ssl` или `none`; для `ssl` порт по умолчанию `465`, для остальных режимов — `587`. Логин и пароль можно не задавать для SMTP-сервера без авторизации. Приглашение создаёт постоянное уведомление в приложении и отправляет email. Если SMTP не настроен или недоступен, приглашение и уведомление в приложении сохраняются; ответ API сообщает `"email_notification_sent": false`, а backend записывает ошибку отправки в лог.
+
+Авторизованный пользователь получает свои уведомления через `GET /api/notifications` (параметры `page` и `page_size`; ответ содержит `unread_count`), отмечает одно уведомление прочитанным через `POST /api/notifications/{notification_id}/read` или отмечает все через `POST /api/notifications/read-all`. Чтение и отметка всегда ограничены текущим пользователем.

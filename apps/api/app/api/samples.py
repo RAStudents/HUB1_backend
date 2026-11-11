@@ -57,7 +57,9 @@ def list_gallery_samples(
     class_ids: list[int] | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(
+        require_dataset_role({"owner", "labeler", "observer"})
+    ),
     dataset=Depends(get_dataset_or_404),
     s3: S3Client = Depends(get_s3_client),
     sample_repo=Depends(get_sample_repo),
@@ -189,7 +191,7 @@ def list_gallery_samples(
 async def import_dataset_zip(dataset_id: int,
                              background_tasks: BackgroundTasks,
                              file: UploadFile = File(...),
-                             user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                             user: CurrentUser = Depends(require_dataset_role({"owner"})),
                              dataset=Depends(get_dataset_or_404),
                              import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
     """Принимает ZIP с датасетом, проходит по train/val/test и строит все превью с масками."""
@@ -234,7 +236,7 @@ async def import_dataset_zip(dataset_id: int,
 @router.post("/upload-url", response_model=UploadUrlResponse)
 def get_upload_url(dataset_id: int,
                    req: UploadUrlRequest,
-                   user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                   user: CurrentUser = Depends(require_dataset_role({"owner"})),
                    s3: S3Client = Depends(get_s3_client)) -> UploadUrlResponse:
     """Выдаёт presigned PUT ссылку для прямой загрузки кадра во временный префикс S3."""
     raw_key = f"datasets/{dataset_id}/_incoming/{req.split.lower()}/{req.filename}"
@@ -247,7 +249,7 @@ def complete_upload(
     request: Request,
     dataset_id: int,
     req: CompleteUploadRequest,
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+    user: CurrentUser = Depends(require_dataset_role({"owner"})),
     dataset=Depends(get_dataset_or_404),
     s3: S3Client = Depends(get_s3_client),
     sample_repo=Depends(get_sample_repo),

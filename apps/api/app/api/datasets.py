@@ -251,6 +251,9 @@ def get_dataset_gallery(
     offset: int = Query(0, ge=0),
     class_ids: list[int] | None = Query(None),
     filenames: list[str] | None = Query(None),
+    _user: CurrentUser = Depends(
+        require_dataset_role({"owner", "labeler", "observer"})
+    ),
     dataset=Depends(get_dataset_or_404),
     sample_repo=Depends(get_sample_repo),
 ):

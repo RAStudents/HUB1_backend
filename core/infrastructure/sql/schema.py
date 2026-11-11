@@ -128,6 +128,25 @@ events_table = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
+notifications_table = Table(
+    "notifications",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("type", String(50), nullable=False),
+    Column("title", String(255), nullable=False),
+    Column("message", Text, nullable=False),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True),
+    Column("is_read", Boolean, default=False, nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index(
+    "ix_notifications_user_read_created",
+    notifications_table.c.user_id,
+    notifications_table.c.is_read,
+    notifications_table.c.created_at,
+)
+
 exports_table = Table(
     "exports",
     metadata,

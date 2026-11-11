@@ -89,10 +89,68 @@ class SampleRepository:
         query = (
             samples_table.update()
             .where(samples_table.c.id == sample_id)
-            .values(lock_user=user_id, lock_until=lock_until)
+            .values(
+                lock_user=user_id,
+                lock_until=lock_until,
+                status="in_progress",
+            )
         )
         self.db.execute(query)
         self.db.commit()
+
+    def acquire_sample_lock(
+        self,
+        dataset_id: int,
+        sample_id: int,
+        user_id: int,
+        lock_until: datetime,
+        now: datetime,
+    ) -> bool:
+        result = self.db.execute(
+            samples_table.update()
+            .where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.id == sample_id,
+                or_(
+                    samples_table.c.lock_user.is_(None),
+                    samples_table.c.lock_until.is_(None),
+                    samples_table.c.lock_until <= now,
+                    samples_table.c.lock_user == user_id,
+                ),
+            )
+            .values(
+                lock_user=user_id,
+                lock_until=lock_until,
+                status="in_progress",
+            )
+        )
+        if result.rowcount:
+            self.db.commit()
+            return True
+        self.db.rollback()
+        return False
+
+    def release_sample_lock(
+        self,
+        dataset_id: int,
+        sample_id: int,
+        user_id: int | None = None,
+    ) -> bool:
+        query = samples_table.update().where(
+            samples_table.c.dataset_id == dataset_id,
+            samples_table.c.id == sample_id,
+            samples_table.c.lock_user.is_not(None),
+        )
+        if user_id is not None:
+            query = query.where(samples_table.c.lock_user == user_id)
+        result = self.db.execute(
+            query.values(lock_user=None, lock_until=None)
+        )
+        if result.rowcount:
+            self.db.commit()
+            return True
+        self.db.rollback()
+        return False
 
     def set_status(self,
                    sample_id: int,

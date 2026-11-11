@@ -12,7 +12,12 @@ from core.application.auth_service import AuthService
 from core.application.dataset_service import DatasetService
 from core.application.dataset_statistics_service import DatasetStatisticsService
 from core.application.export_service import ExportService
+from core.application.invitation_notification_service import (
+    InvitationNotificationService,
+)
+from core.application.membership_service import MembershipService
 from core.application.import_service import ImportService
+from core.application.lock_service import LockService
 from core.application.review_service import ReviewService
 from core.infrastructure.auth.tokens import decode_access_claims
 from core.infrastructure.email.smtp import SMTPEmailService
@@ -37,6 +42,10 @@ def get_s3_client() -> S3Client:
 
 def get_email_service() -> SMTPEmailService:
     return SMTPEmailService.from_env()
+
+
+def get_invitation_notification_service() -> InvitationNotificationService:
+    return InvitationNotificationService(email_service=get_email_service)
 
 
 def get_db_connection():
@@ -74,6 +83,11 @@ def get_class_repo(db=Depends(get_db_connection)):
 def get_membership_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.memberships import MembershipRepository
     return MembershipRepository(db)
+
+
+def get_notification_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.notifications import NotificationRepository
+    return NotificationRepository(db)
 
 
 def get_export_repo(db=Depends(get_db_connection)):
@@ -184,6 +198,28 @@ def get_dataset_statistics_service(
         sample_repo=sample_repo,
         class_repo=class_repo,
         s3_client=s3,
+    )
+
+
+def get_membership_service(
+    membership_repo=Depends(get_membership_repo),
+    notification_repo=Depends(get_notification_repo),
+) -> MembershipService:
+    return MembershipService(
+        membership_repo=membership_repo,
+        notification_repo=notification_repo,
+    )
+
+
+def get_lock_service(
+    sample_repo=Depends(get_sample_repo),
+    membership_repo=Depends(get_membership_repo),
+    event_repo=Depends(get_event_repo),
+) -> LockService:
+    return LockService(
+        sample_repo=sample_repo,
+        membership_repo=membership_repo,
+        event_repo=event_repo,
     )
 
 

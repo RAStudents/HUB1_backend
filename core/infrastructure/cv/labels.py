@@ -25,11 +25,7 @@ def parse_label_file(path: Path,
     
     parser = LabelParser(nc=nc, task_type=task, category=category)
     
-    try:
-        return parser.parse(path=path, is_strict=is_strict) or []
-    except Exception as e:
-        print(f"[WARNING] Ошибка парсинга разметки в {path.name}: {e}")
-        return []
+    return parser.parse(path=path, is_strict=is_strict)
 
 
 def write_label_file(path: Path,

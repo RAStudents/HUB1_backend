@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from apps.api.app.deps import (
     CurrentUser,
     get_annotation_service,
-    get_current_user,
     get_dataset_or_404,
+    require_dataset_role,
 )
 from apps.api.app.schemas.annotation import FrameAnnotationsDTO
 from core.application.annotation_service import AnnotationService
@@ -26,7 +26,9 @@ router = APIRouter(
 @router.get("", response_model=FrameAnnotationsDTO)
 def get_annotations(dataset_id: int,
                     sample_id: int,
-                    user: CurrentUser = Depends(get_current_user),
+                    user: CurrentUser = Depends(
+                        require_dataset_role({"owner", "labeler", "observer"})
+                    ),
                     dataset=Depends(get_dataset_or_404),
                     service: AnnotationService = Depends(get_annotation_service)) -> FrameAnnotationsDTO:
     """Отдаёт нормализованную разметку кадра (Box / OBB в градусах / Polygon)."""
@@ -48,7 +50,9 @@ def get_annotations(dataset_id: int,
 def save_annotations(dataset_id: int,
                      sample_id: int,
                      payload: FrameAnnotationsDTO,
-                     user: CurrentUser = Depends(get_current_user),
+                     user: CurrentUser = Depends(
+                         require_dataset_role({"owner", "labeler"})
+                     ),
                      dataset=Depends(get_dataset_or_404),
                      service: AnnotationService = Depends(get_annotation_service)) -> FrameAnnotationsDTO:
     """

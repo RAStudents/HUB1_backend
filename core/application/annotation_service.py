@@ -90,9 +90,14 @@ class AnnotationService:
         sample = self.samples.get_by_id(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
             raise LookupError("Кадр не найден")
+        if role == "labeler" and sample.status != "in_progress":
+            raise PermissionError("Разметчик может изменять только кадр в работе")
 
         now = datetime.now(timezone.utc)
-        lock_expired = sample.lock_until and sample.lock_until < now
+        lock_until = sample.lock_until
+        if lock_until is not None and lock_until.tzinfo is None:
+            lock_until = lock_until.replace(tzinfo=timezone.utc)
+        lock_expired = lock_until and lock_until < now
         if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
 

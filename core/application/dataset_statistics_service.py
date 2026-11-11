@@ -263,7 +263,7 @@ class DatasetStatisticsService:
                         path=label_path,
                         class_names=class_names,
                         task=task,
-                        is_strict=False,
+                        is_strict=True,
                     )
             else:
                 instances = []
