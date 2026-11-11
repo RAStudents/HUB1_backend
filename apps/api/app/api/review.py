@@ -28,12 +28,10 @@ router = APIRouter(
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def submit_sample_for_review(
-    dataset_id: int,
-    sample_id: int,
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-    service: ReviewService = Depends(get_review_service),
-) -> ReviewStatusDTO:
+def submit_sample_for_review(dataset_id: int,
+                             sample_id: int,
+                             user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                             service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
     try:
         new_status = service.submit_for_review(
             dataset_id=dataset_id,
@@ -54,13 +52,11 @@ def submit_sample_for_review(
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def decide_sample_review(
-    dataset_id: int,
-    sample_id: int,
-    payload: ReviewDecisionDTO,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    service: ReviewService = Depends(get_review_service),
-) -> ReviewStatusDTO:
+def decide_sample_review(dataset_id: int,
+                         sample_id: int,
+                         payload: ReviewDecisionDTO,
+                         user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                         service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
     try:
         new_status = service.decide(
             dataset_id=dataset_id,
@@ -82,12 +78,10 @@ def decide_sample_review(
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def reopen_sample_for_revision(
-    dataset_id: int,
-    sample_id: int,
-    user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
-    service: ReviewService = Depends(get_review_service),
-) -> ReviewStatusDTO:
+def reopen_sample_for_revision(dataset_id: int,
+                               sample_id: int,
+                               user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
+                               service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
     try:
         new_status = service.reopen_for_revision(
             dataset_id=dataset_id,

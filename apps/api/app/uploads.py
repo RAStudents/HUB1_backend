@@ -7,10 +7,11 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile, status
 
 
-MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ZIP_BYTES = 5 * 1024 * 1024 * 1024
 
 
-async def spool_upload(upload: UploadFile, limit: int = MAX_ZIP_BYTES) -> Path:
+async def spool_upload(upload: UploadFile,
+                       limit: int = MAX_ZIP_BYTES) -> Path:
     """Пишет загрузку во временный файл и не держит архив целиком в памяти."""
     descriptor, raw_path = tempfile.mkstemp(prefix="hub_upload_", suffix=".zip")
     path = Path(raw_path)

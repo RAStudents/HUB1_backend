@@ -47,26 +47,24 @@ router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["samples"])
 
 
 @router.get("", response_model=GalleryPageDTO)
-def list_gallery_samples(
-    request: Request,
-    dataset_id: int,
-    split: Optional[str] = Query(None, description="train | val | test | None (все)"),
-    sample_status: Optional[str] = Query(None, alias="status"),
-    search: Optional[str] = Query(None, max_length=255),
-    labeled: Optional[bool] = Query(None),
-    object_count: Optional[str] = Query(None, pattern="^(none|one|multiple)$"),
-    class_ids: list[int] | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(24, ge=1, le=100),
-    user: CurrentUser = Depends(
-        require_dataset_role({"owner", "labeler", "observer"})
-    ),
-    dataset=Depends(get_dataset_or_404),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    annotation_repo=Depends(get_annotation_repo),
-    class_repo=Depends(get_class_repo),
-) -> GalleryPageDTO:
+def list_gallery_samples(request: Request,
+                         dataset_id: int,
+                         split: Optional[str] = Query(None, description="train | val | test | None (все)"),
+                         sample_status: Optional[str] = Query(None, alias="status"),
+                         search: Optional[str] = Query(None, max_length=255),
+                         labeled: Optional[bool] = Query(None),
+                         object_count: Optional[str] = Query(None, pattern="^(none|one|multiple)$"),
+                         class_ids: list[int] | None = Query(None),
+                         page: int = Query(1, ge=1),
+                         page_size: int = Query(24, ge=1, le=100),
+                         user: CurrentUser = Depends(
+                             require_dataset_role({"owner", "labeler", "observer"})
+                         ),
+                         dataset=Depends(get_dataset_or_404),
+                         s3: S3Client = Depends(get_s3_client),
+                         sample_repo=Depends(get_sample_repo),
+                         annotation_repo=Depends(get_annotation_repo),
+                         class_repo=Depends(get_class_repo)) -> GalleryPageDTO:
     """Возвращает только одну страницу карточек и геометрию разметки."""
     normalized_split = split.lower() if split and split.lower() != "all" else None
     class_names = class_repo.get_names(dataset_id)
@@ -214,15 +212,13 @@ def get_upload_url(dataset_id: int,
 
 
 @router.post("/complete-upload", response_model=SampleCardDTO)
-def complete_upload(
-    request: Request,
-    dataset_id: int,
-    req: CompleteUploadRequest,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    dataset=Depends(get_dataset_or_404),
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-) -> SampleCardDTO:
+def complete_upload(request: Request,
+                    dataset_id: int,
+                    req: CompleteUploadRequest,
+                    user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                    dataset=Depends(get_dataset_or_404),
+                    s3: S3Client = Depends(get_s3_client),
+                    sample_repo=Depends(get_sample_repo)) -> SampleCardDTO:
     """
     Завершает загрузку одиночного кадра:
     конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.

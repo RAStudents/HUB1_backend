@@ -4,18 +4,17 @@ from core.infrastructure.sql.schema import notifications_table
 
 
 class NotificationRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def create(
-        self,
-        user_id: int,
-        notification_type: str,
-        title: str,
-        message: str,
-        dataset_id: int | None = None,
-        commit: bool = True,
-    ) -> int:
+    def create(self,
+               user_id: int,
+               notification_type: str,
+               title: str,
+               message: str,
+               dataset_id: int | None = None,
+               commit: bool = True) -> int:
         result = self.db.execute(
             notifications_table.insert().values(
                 user_id=user_id,
@@ -31,12 +30,10 @@ class NotificationRepository:
             self.db.commit()
         return notification_id
 
-    def list_for_user(
-        self,
-        user_id: int,
-        offset: int,
-        limit: int,
-    ) -> tuple[list, int, int]:
+    def list_for_user( self,
+                       user_id: int,
+                       offset: int,
+                       limit: int) -> tuple[list, int, int]:
         rows = self.db.execute(
             select(notifications_table)
             .where(notifications_table.c.user_id == user_id)
@@ -55,7 +52,8 @@ class NotificationRepository:
         unread_count = self.get_unread_count(user_id)
         return [dict(row._mapping) for row in rows], total, unread_count
 
-    def get_unread_count(self, user_id: int) -> int:
+    def get_unread_count(self,
+                         user_id: int) -> int:
         return self.db.execute(
             select(func.count())
             .select_from(notifications_table)
@@ -65,7 +63,9 @@ class NotificationRepository:
             )
         ).scalar_one()
 
-    def mark_read(self, user_id: int, notification_id: int) -> bool:
+    def mark_read(self,
+                  user_id: int,
+                  notification_id: int) -> bool:
         result = self.db.execute(
             notifications_table.update()
             .where(
@@ -77,7 +77,8 @@ class NotificationRepository:
         self.db.commit()
         return result.rowcount > 0
 
-    def mark_all_read(self, user_id: int) -> int:
+    def mark_all_read(self,
+                      user_id: int) -> int:
         result = self.db.execute(
             notifications_table.update()
             .where(

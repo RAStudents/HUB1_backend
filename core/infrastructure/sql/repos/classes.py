@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class ClassRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
     def ensure_classes(self,
@@ -42,7 +43,8 @@ class ClassRepository:
         rows = self.db.execute(query).fetchall()
         return [row.name for row in rows]
 
-    def list_for_dataset(self, dataset_id: int) -> list:
+    def list_for_dataset(self,
+                         dataset_id: int) -> list:
         query = (
             classes_table.select()
             .where(classes_table.c.dataset_id == dataset_id)

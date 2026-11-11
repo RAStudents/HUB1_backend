@@ -11,21 +11,22 @@ _ROLE_LABELS = {
 
 
 class MembershipService:
-    def __init__(self, membership_repo: Any, notification_repo: Any):
+    def __init__(self,
+                 membership_repo: Any,
+                 notification_repo: Any):
         self.memberships = membership_repo
         self.notifications = notification_repo
 
-    def list_members(self, dataset_id: int) -> list[dict]:
+    def list_members(self,
+                     dataset_id: int) -> list[dict]:
         return self.memberships.list_members(dataset_id=dataset_id)
 
-    def add_member(
-        self,
-        dataset_id: int,
-        email: str,
-        role: MemberRole,
-        dataset_name: str,
-        inviter_user_id: int,
-    ) -> dict:
+    def add_member(self,
+                   dataset_id: int,
+                   email: str,
+                   role: MemberRole,
+                   dataset_name: str,
+                   inviter_user_id: int) -> dict:
         self._validate_assignable_role(role)
         user = self.memberships.get_user_by_email(email=email)
         if user is None:
@@ -78,12 +79,10 @@ class MembershipService:
         member["inviter_name"] = inviter.name
         return member
 
-    def update_member_role(
-        self,
-        dataset_id: int,
-        user_id: int,
-        role: MemberRole,
-    ) -> dict:
+    def update_member_role(self,
+                           dataset_id: int,
+                           user_id: int,
+                           role: MemberRole) -> dict:
         self._validate_assignable_role(role)
         current_role = self.memberships.get_user_role(
             dataset_id=dataset_id,
@@ -101,7 +100,9 @@ class MembershipService:
         )
         return self._get_member(dataset_id, user_id)
 
-    def remove_member(self, dataset_id: int, user_id: int) -> None:
+    def remove_member(self,
+                      dataset_id: int,
+                      user_id: int) -> None:
         current_role = self.memberships.get_user_role(
             dataset_id=dataset_id,
             user_id=user_id,
@@ -112,7 +113,9 @@ class MembershipService:
             raise ValueError("Нельзя удалить владельца датасета")
         self.memberships.remove_member(dataset_id=dataset_id, user_id=user_id)
 
-    def _get_member(self, dataset_id: int, user_id: int) -> dict:
+    def _get_member(self,
+                    dataset_id: int,
+                    user_id: int) -> dict:
         for member in self.memberships.list_members(dataset_id=dataset_id):
             if member["user_id"] == user_id:
                 return member

@@ -221,21 +221,17 @@ def get_dataset_statistics_service(sample_repo=Depends(get_sample_repo),
     )
 
 
-def get_membership_service(
-    membership_repo=Depends(get_membership_repo),
-    notification_repo=Depends(get_notification_repo),
-) -> MembershipService:
+def get_membership_service(membership_repo=Depends(get_membership_repo),
+                           notification_repo=Depends(get_notification_repo)) -> MembershipService:
     return MembershipService(
         membership_repo=membership_repo,
         notification_repo=notification_repo,
     )
 
 
-def get_lock_service(
-    sample_repo=Depends(get_sample_repo),
-    membership_repo=Depends(get_membership_repo),
-    event_repo=Depends(get_event_repo),
-) -> LockService:
+def get_lock_service(sample_repo=Depends(get_sample_repo),
+                     membership_repo=Depends(get_membership_repo),
+                     event_repo=Depends(get_event_repo)) -> LockService:
     return LockService(
         sample_repo=sample_repo,
         membership_repo=membership_repo,
@@ -243,12 +239,10 @@ def get_lock_service(
     )
 
 
-def get_import_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    annotation_repo=Depends(get_annotation_repo),
-) -> ImportService:
+def get_import_service(s3: S3Client = Depends(get_s3_client),
+                       sample_repo=Depends(get_sample_repo),
+                       class_repo=Depends(get_class_repo),
+                       annotation_repo=Depends(get_annotation_repo)) -> ImportService:
     return ImportService(
         s3_client=s3,
         sample_repo=sample_repo,

@@ -1,3 +1,5 @@
+# core/application/dataset_statistics_service.py
+
 import json
 from pathlib import Path
 from typing import Any
@@ -14,22 +16,19 @@ from core.infrastructure.media.scratch import scratch_dir, scratch_file
 
 
 class DatasetStatisticsService:
-    def __init__(self, sample_repo: Any, class_repo: Any, s3_client: Any):
+    def __init__(self,
+                 sample_repo: Any,
+                 class_repo: Any,
+                 s3_client: Any):
         self.samples = sample_repo
         self.classes = class_repo
         self.s3 = s3_client
 
-    def get_statistics(
-        self,
-        dataset_id: int,
-        task: TaskType,
-        grid_size: int = 20,
-    ) -> dict:
-        if (
-            isinstance(grid_size, bool)
-            or not isinstance(grid_size, int)
-            or grid_size < 1
-        ):
+    def get_statistics(self,
+                       dataset_id: int,
+                       task: TaskType,
+                       grid_size: int = 20) -> dict:
+        if (isinstance(grid_size, bool) or not isinstance(grid_size, int) or grid_size < 1):
             raise ValueError("Размер сетки должен быть положительным целым числом")
 
         class_names = self.classes.get_names(dataset_id)
@@ -122,11 +121,9 @@ class DatasetStatisticsService:
             }
 
     @staticmethod
-    def _serialize_split_statistics(
-        split_statistics: Any,
-        class_names: list[str],
-        names_for_library: list[str],
-    ) -> dict | None:
+    def _serialize_split_statistics(split_statistics: Any,
+                                    class_names: list[str],
+                                    names_for_library: list[str]) -> dict | None:
         if split_statistics is None:
             return None
 
@@ -155,15 +152,13 @@ class DatasetStatisticsService:
             },
         }
 
-    def _build_library_dataset(
-        self,
-        root: Path,
-        dataset_id: int,
-        task: TaskType,
-        names: list[str],
-        category: type,
-        class_count: int,
-    ) -> dict[DataSplit, list[Sample]]:
+    def _build_library_dataset(self,
+                               root: Path,
+                               dataset_id: int,
+                               task: TaskType,
+                               names: list[str],
+                               category: type,
+                               class_count: int) -> dict[DataSplit, list[Sample]]:
         directories: dict[str, tuple[Path, Path]] = {}
         for split_name in ("train", "val", "test"):
             images_dir = root / split_name / "images"
@@ -246,12 +241,10 @@ class DatasetStatisticsService:
 
         return samples_by_split
 
-    def _populate_missing_geometries(
-        self,
-        dataset_id: int,
-        class_names: list[str],
-        task: TaskType,
-    ) -> None:
+    def _populate_missing_geometries(self,
+                                     dataset_id: int,
+                                     class_names: list[str],
+                                     task: TaskType) -> None:
         missing_rows = self.samples.list_missing_geometries(dataset_id)
         for index, sample in enumerate(missing_rows, start=1):
             raw_label = self.s3.get_bytes(sample.label_key) or b""

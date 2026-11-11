@@ -52,14 +52,16 @@ def instance_to_dto(instance: Instance,
     )
 
 
-def _unit(value: float, name: str) -> float:
+def _unit(value: float,
+          name: str) -> float:
     number = float(value)
     if not math.isfinite(number) or not 0.0 <= number <= 1.0:
         raise ValueError(f"Координата {name} должна быть от 0 до 1")
     return number
 
 
-def _positive_unit(value: float, name: str) -> float:
+def _positive_unit(value: float,
+                   name: str) -> float:
     number = _unit(value, name)
     if number <= 0.0:
         raise ValueError(f"Размер {name} должен быть больше 0")

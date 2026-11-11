@@ -106,7 +106,8 @@ class AuthService:
 
         return self._issue_session(user_id=user.id, email=user.email, name=user.name)
 
-    def refresh(self, refresh_token: str) -> dict:
+    def refresh(self,
+                refresh_token: str) -> dict:
         """
         Меняет refresh на новую пару.
         Повтор уже отозванного refresh гасит всю цепочку этой сессии.
@@ -162,7 +163,8 @@ class AuthService:
                 self.tokens.revoke_family(row.family_id)
         self.tokens.revoke_all_refresh_for_user(user_id)
 
-    def logout_refresh_only(self, refresh_token: str) -> None:
+    def logout_refresh_only(self,
+                            refresh_token: str) -> None:
         """Гасит сессии по одному refresh, когда access уже истёк и Bearer не пройти."""
         if not isinstance(refresh_token, str) or not refresh_token or len(refresh_token) > 200:
             return

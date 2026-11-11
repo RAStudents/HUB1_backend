@@ -47,7 +47,8 @@ class MembershipRepository:
         dataset_ids.update(self.db.execute(owned_query).scalars())
         return sorted(dataset_ids)
 
-    def list_members(self, dataset_id: int) -> list[dict]:
+    def list_members(self,
+                     dataset_id: int) -> list[dict]:
         query = (
             select(
                 memberships_table.c.user_id.label("user_id"),
@@ -98,7 +99,8 @@ class MembershipRepository:
 
         return sorted(members, key=lambda member: (member["role"] != "owner", member["email"]))
 
-    def get_user_by_email(self, email: str):
+    def get_user_by_email(self,
+                          email: str):
         query = select(
             users_table.c.id,
             users_table.c.email,
@@ -106,7 +108,8 @@ class MembershipRepository:
         ).where(func.lower(users_table.c.email) == email.strip().lower())
         return self.db.execute(query).first()
 
-    def get_user_by_id(self, user_id: int):
+    def get_user_by_id(self,
+                       user_id: int):
         query = select(
             users_table.c.id,
             users_table.c.email,
@@ -114,13 +117,11 @@ class MembershipRepository:
         ).where(users_table.c.id == user_id)
         return self.db.execute(query).first()
 
-    def add_member(
-        self,
-        dataset_id: int,
-        user_id: int,
-        role: str,
-        commit: bool = True,
-    ) -> None:
+    def add_member(self,
+                   dataset_id: int,
+                   user_id: int,
+                   role: str,
+                   commit: bool = True) -> None:
         self.db.execute(
             memberships_table.insert().values(
                 dataset_id=dataset_id,
@@ -131,7 +132,10 @@ class MembershipRepository:
         if commit:
             self.db.commit()
 
-    def set_member_role(self, dataset_id: int, user_id: int, role: str) -> bool:
+    def set_member_role(self,
+                        dataset_id: int,
+                        user_id: int,
+                        role: str) -> bool:
         result = self.db.execute(
             memberships_table.update()
             .where(
@@ -145,7 +149,9 @@ class MembershipRepository:
             return True
         return False
 
-    def remove_member(self, dataset_id: int, user_id: int) -> bool:
+    def remove_member(self,
+                      dataset_id: int,
+                      user_id: int) -> bool:
         result = self.db.execute(
             memberships_table.delete().where(
                 (memberships_table.c.dataset_id == dataset_id)

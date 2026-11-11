@@ -17,7 +17,9 @@ from core.infrastructure.media.yaml_safe import load_yaml_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
+
 logger = logging.getLogger(__name__)
+
 
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
 
@@ -131,7 +133,8 @@ def build_acmenra_dataset(root: Path,
     return config
 
 
-def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
+def load_split_samples(config: Config,
+                       split: DataSplit) -> list[Sample]:
     if split == DataSplit.TRAIN:
         image_dir = config.get_train_images()
         label_dir = config.get_train_labels()
@@ -167,13 +170,11 @@ def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
 
 
 class ImportService:
-    def __init__(
-            self,
-            s3_client: Any,
-            sample_repo: Any,
-            class_repo: Any,
-            annotation_repo: Any | None = None,
-    ):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 class_repo: Any,
+                 annotation_repo: Any | None = None):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo

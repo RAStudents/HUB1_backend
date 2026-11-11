@@ -5,8 +5,8 @@ from io import BytesIO
 from urllib.parse import quote
 from acmenra_cv import TaskType
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from apps.api.app.deps import (
     CurrentUser,
@@ -17,6 +17,7 @@ from apps.api.app.deps import (
     get_sample_repo,
     get_s3_client,
 )
+
 from apps.api.app.schemas.export import ExportClassDTO, ExportRequestDTO, ExportStatusDTO
 from core.application.export_service import ExportService
 from core.infrastructure.s3.client import S3Client
@@ -25,13 +26,14 @@ from apps.api.app.deps import require_dataset_role
 
 logger = logging.getLogger(__name__)
 
-def _normalize_split(split: str | None) -> str:
-    normalized = (split or "train").lower()
-    return "val" if normalized == "valid" else normalized
-
 
 router = APIRouter(prefix="/datasets/{dataset_id}/exports",
                    tags=["export"])
+
+
+def _normalize_split(split: str | None) -> str:
+    normalized = (split or "train").lower()
+    return "val" if normalized == "valid" else normalized
 
 
 @router.post("", response_model=ExportStatusDTO, status_code=status.HTTP_202_ACCEPTED)
@@ -116,11 +118,9 @@ def start_export(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def list_export_classes(
-    dataset_id: int,
-    class_repo=Depends(get_class_repo),
-    sample_repo=Depends(get_sample_repo),
-) -> list[ExportClassDTO]:
+def list_export_classes(dataset_id: int,
+                        class_repo=Depends(get_class_repo),
+                        sample_repo=Depends(get_sample_repo)) -> list[ExportClassDTO]:
     classes = class_repo.list_for_dataset(dataset_id)
     class_counts = sample_repo.get_class_counts(dataset_id)
     return [

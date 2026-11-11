@@ -1,5 +1,6 @@
-import smtplib
+# apps/api/app/api/members.py
 
+import smtplib
 import logging
 import smtplib
 
@@ -12,31 +13,25 @@ from apps.api.app.deps import (
     get_membership_service,
     require_dataset_role,
 )
-from apps.api.app.schemas.member import (
-    AddDatasetMemberDTO,
-    DatasetMemberDTO,
-    UpdateDatasetMemberRoleDTO,
-)
-from core.application.invitation_notification_service import (
-    InvitationNotificationService,
-)
+from apps.api.app.schemas.member import AddDatasetMemberDTO, DatasetMemberDTO, UpdateDatasetMemberRoleDTO
+from core.application.invitation_notification_service import InvitationNotificationService
 from core.application.membership_service import MembershipService
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
     prefix="/datasets/{dataset_id}/members",
     tags=["members"],
 )
-logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[DatasetMemberDTO])
-def list_dataset_members(
-    dataset_id: int,
-    _user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    _dataset=Depends(get_dataset_or_404),
-    service: MembershipService = Depends(get_membership_service),
-) -> list[DatasetMemberDTO]:
+def list_dataset_members(dataset_id: int,
+                         _user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                         _dataset=Depends(get_dataset_or_404),
+                         service: MembershipService = Depends(get_membership_service)) -> list[DatasetMemberDTO]:
     return service.list_members(dataset_id=dataset_id)
 
 
@@ -45,16 +40,14 @@ def list_dataset_members(
     response_model=DatasetMemberDTO,
     status_code=status.HTTP_201_CREATED,
 )
-def add_dataset_member(
-    dataset_id: int,
-    payload: AddDatasetMemberDTO,
-    user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    dataset=Depends(get_dataset_or_404),
-    service: MembershipService = Depends(get_membership_service),
-    notifications: InvitationNotificationService = Depends(
-        get_invitation_notification_service
-    ),
-) -> DatasetMemberDTO:
+def add_dataset_member(dataset_id: int,
+                       payload: AddDatasetMemberDTO,
+                       user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                       dataset=Depends(get_dataset_or_404),
+                       service: MembershipService = Depends(get_membership_service),
+                       notifications: InvitationNotificationService = Depends(
+                           get_invitation_notification_service
+                       )) -> DatasetMemberDTO:
     try:
         member = service.add_member(
             dataset_id=dataset_id,
@@ -93,14 +86,12 @@ def add_dataset_member(
     "/{member_user_id}",
     response_model=DatasetMemberDTO,
 )
-def update_dataset_member_role(
-    dataset_id: int,
-    member_user_id: int,
-    payload: UpdateDatasetMemberRoleDTO,
-    _user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    _dataset=Depends(get_dataset_or_404),
-    service: MembershipService = Depends(get_membership_service),
-) -> DatasetMemberDTO:
+def update_dataset_member_role(dataset_id: int,
+                               member_user_id: int,
+                               payload: UpdateDatasetMemberRoleDTO,
+                               _user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                               _dataset=Depends(get_dataset_or_404),
+                               service: MembershipService = Depends(get_membership_service)) -> DatasetMemberDTO:
     try:
         return service.update_member_role(
             dataset_id=dataset_id,
@@ -117,13 +108,11 @@ def update_dataset_member_role(
     "/{member_user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def remove_dataset_member(
-    dataset_id: int,
-    member_user_id: int,
-    _user: CurrentUser = Depends(require_dataset_role({"owner"})),
-    _dataset=Depends(get_dataset_or_404),
-    service: MembershipService = Depends(get_membership_service),
-) -> Response:
+def remove_dataset_member(dataset_id: int,
+                          member_user_id: int,
+                          _user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                          _dataset=Depends(get_dataset_or_404),
+                          service: MembershipService = Depends(get_membership_service),) -> Response:
     try:
         service.remove_member(dataset_id=dataset_id, user_id=member_user_id)
     except LookupError as exc:

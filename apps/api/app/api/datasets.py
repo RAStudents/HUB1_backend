@@ -2,9 +2,9 @@
 
 import shutil
 import logging
-from collections import Counter
 from pathlib import Path
 from typing import Optional
+from collections import Counter
 from acmenra_cv import TaskType
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
@@ -21,22 +21,29 @@ from apps.api.app.deps import (
     require_dataset_role,
 )
 from apps.api.app.errors import client_error
-from apps.api.app.schemas.dataset import CreateDatasetRequest
 from apps.api.app.uploads import spool_upload
+from apps.api.app.schemas.import_job import ImportJobDTO
+from apps.api.app.import_tasks import run_new_dataset_import
+from apps.api.app.schemas.dataset import CreateDatasetRequest
+
 from core.application.dataset_service import DatasetService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.s3.keys import clean_filename, clean_split
-from apps.api.app.import_tasks import run_new_dataset_import
-from apps.api.app.schemas.import_job import ImportJobDTO
-
 
 
 logger = logging.getLogger(__name__)
 
+
+router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+
 STORAGE_DIR = Path("storage")
 
 
-def _gallery_item(row, class_names, s3: S3Client, base_url: str, sample_repo) -> dict:
+def _gallery_item(row, class_names,
+                  s3: S3Client,
+                  base_url: str,
+                  sample_repo) -> dict:
     annotations = sample_repo.get_geometries(getattr(row, "geometry_json", None))
     counts = Counter(
         item["class_id"]
@@ -64,9 +71,6 @@ def _gallery_item(row, class_names, s3: S3Client, base_url: str, sample_repo) ->
             for class_id, count in sorted(counts.items())
         ],
     }
-
-
-router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
 @router.get("/")
@@ -196,11 +200,9 @@ async def upload_and_save_dataset(request: Request,
 
 
 @router.get("/imports/{import_id}", response_model=ImportJobDTO)
-def get_import_status(
-    import_id: int,
-    user: CurrentUser = Depends(get_current_user),
-    import_job_repo=Depends(get_import_job_repo),
-) -> ImportJobDTO:
+def get_import_status(import_id: int,
+                      user: CurrentUser = Depends(get_current_user),
+                      import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
     record = import_job_repo.get_by_id(import_id)
     if record is None or record.user_id != user.id:
         raise HTTPException(
@@ -223,23 +225,21 @@ def get_import_status(
 
 
 @router.get("/{dataset_id}/gallery")
-def get_dataset_gallery(
-    dataset_id: int,
-    request: Request,
-    response: Response,
-    split: str = Query("train"),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    class_ids: list[int] | None = Query(None),
-    filenames: list[str] | None = Query(None),
-    _user: CurrentUser = Depends(
-        require_dataset_role({"owner", "labeler", "observer"})
-    ),
-    dataset=Depends(get_dataset_or_404),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    s3: S3Client = Depends(get_s3_client),
-):
+def get_dataset_gallery(dataset_id: int,
+                        request: Request,
+                        response: Response,
+                        split: str = Query("train"),
+                        limit: int = Query(50, ge=1, le=500),
+                        offset: int = Query(0, ge=0),
+                        class_ids: list[int] | None = Query(None),
+                        filenames: list[str] | None = Query(None),
+                        _user: CurrentUser = Depends(
+                            require_dataset_role({"owner", "labeler", "observer"})
+                        ),
+                        dataset=Depends(get_dataset_or_404),
+                        sample_repo=Depends(get_sample_repo),
+                        class_repo=Depends(get_class_repo),
+                        s3: S3Client = Depends(get_s3_client)):
     normalized = (split or "train").lower()
     try:
         split_arg = None if normalized == "all" else clean_split(normalized)

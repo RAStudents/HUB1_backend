@@ -33,23 +33,32 @@ def clean_stem(stem: str) -> str:
     return clean_filename(stem)
 
 
-def image_key(dataset_id: int, split: str, filename: str) -> str:
+def image_key(dataset_id: int,
+              split: str,
+              filename: str) -> str:
     return f"datasets/{int(dataset_id)}/{clean_split(split)}/images/{clean_filename(filename)}"
 
 
-def label_key(dataset_id: int, split: str, stem: str) -> str:
+def label_key(dataset_id: int,
+              split: str,
+              stem: str) -> str:
     return f"datasets/{int(dataset_id)}/{clean_split(split)}/labels/{clean_stem(stem)}.txt"
 
 
-def thumb_key(dataset_id: int, split: str, stem: str) -> str:
+def thumb_key(dataset_id: int,
+              split: str,
+              stem: str) -> str:
     return f"datasets/{int(dataset_id)}/{clean_split(split)}/thumbs/{clean_stem(stem)}.jpg"
 
 
-def incoming_key(dataset_id: int, split: str, filename: str) -> str:
+def incoming_key(dataset_id: int,
+                 split: str,
+                 filename: str) -> str:
     return f"datasets/{int(dataset_id)}/_incoming/{clean_split(split)}/{clean_filename(filename)}"
 
 
-def export_zip_key(dataset_id: int, export_id: int) -> str:
+def export_zip_key(dataset_id: int,
+                   export_id: int) -> str:
     return f"datasets/{int(dataset_id)}/exports/{int(export_id)}.zip"
 
 

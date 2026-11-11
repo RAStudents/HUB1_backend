@@ -23,7 +23,8 @@ class Admin(User):
         return self._role
 
     @role.setter
-    def role(self, role: Optional[str]) -> None:
+    def role(self,
+             role: Optional[str]) -> None:
         if role is not None:
             if not isinstance(role, str):
                 raise TypeError("dfdsf")

@@ -42,12 +42,10 @@ def _make_import_service(db) -> ImportService:
     )
 
 
-def run_existing_dataset_import(
-    import_id: int,
-    zip_path: str,
-    dataset_id: int,
-    task: str,
-) -> None:
+def run_existing_dataset_import(import_id: int,
+                                zip_path: str,
+                                dataset_id: int,
+                                task: str) -> None:
     try:
         with SessionLocal() as db:
             import_repo = ImportJobRepository(db)
@@ -86,15 +84,13 @@ def run_existing_dataset_import(
         Path(zip_path).unlink(missing_ok=True)
 
 
-def run_new_dataset_import(
-    import_id: int,
-    zip_path: str,
-    user_id: int,
-    name: str,
-    task: str,
-    is_private: bool,
-    base_url: str,
-) -> None:
+def run_new_dataset_import(import_id: int,
+                           zip_path: str,
+                           user_id: int,
+                           name: str,
+                           task: str,
+                           is_private: bool,
+                           base_url: str) -> None:
     dataset_id: int | None = None
     try:
         with SessionLocal() as db:

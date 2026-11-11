@@ -48,7 +48,9 @@ def public_base(passed: str = "") -> str:
     return ""
 
 
-def media_url(key: str, base_url: str = "", expires_in: int = 3600) -> str:
+def media_url(key: str,
+              base_url: str = "",
+              expires_in: int = 3600) -> str:
     expires_at = int(time.time()) + int(expires_in)
     signature = sign_media(key, expires_at)
     path = f"/api/media?key={quote(key, safe='')}&exp={expires_at}&sig={signature}"
@@ -56,12 +58,15 @@ def media_url(key: str, base_url: str = "", expires_in: int = 3600) -> str:
     return f"{base}{path}" if base else path
 
 
-def sign_media(key: str, expires_at: int) -> str:
+def sign_media(key: str,
+               expires_at: int) -> str:
     message = f"{key}\n{int(expires_at)}".encode("utf-8")
     return hmac.new(jwt_secret().encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
-def media_signature_ok(key: str, expires_at: int, signature: str) -> bool:
+def media_signature_ok(key: str,
+                       expires_at: int,
+                       signature: str) -> bool:
     if not isinstance(signature, str) or not expires_at:
         return False
     if int(expires_at) < int(time.time()):
@@ -85,7 +90,8 @@ class S3Client:
     def ensure_bucket(self) -> None:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    def safe_path(self, key: str) -> Path:
+    def safe_path(self,
+                  key: str) -> Path:
         if not isinstance(key, str) or not key or key.startswith(("/", "\\")):
             raise ValueError("Invalid storage key")
         relative = Path(key)
@@ -106,21 +112,25 @@ class S3Client:
         file_path.write_bytes(data)
         return key
 
-    def get_bytes(self, key: str) -> bytes | None:
+    def get_bytes(self,
+                  key: str) -> bytes | None:
         file_path = self.safe_path(key)
         if not file_path.is_file():
             return None
         return file_path.read_bytes()
 
-    def delete(self, key: str) -> None:
+    def delete(self,
+               key: str) -> None:
         self.safe_path(key).unlink(missing_ok=True)
 
-    def delete_many(self, keys: list[str]) -> None:
+    def delete_many(self,
+                    keys: list[str]) -> None:
         for key in keys:
             if key:
                 self.delete(key)
 
-    def delete_prefix(self, prefix: str) -> None:
+    def delete_prefix(self,
+                      prefix: str) -> None:
         target = self.safe_path(prefix)
         root = self.storage_dir.resolve()
         if target == root:

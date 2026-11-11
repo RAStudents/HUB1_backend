@@ -46,7 +46,8 @@ def read_image_unicode(path: Path) -> np.ndarray | None:
         return None
 
 
-def write_image_unicode(path: Path, img: np.ndarray) -> bool:
+def write_image_unicode(path: Path,
+                        img: np.ndarray) -> bool:
     try:
         path_obj = Path(path)
         path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -231,17 +232,15 @@ def find_dataset_gallery_image(root: Path,
     return None
 
 
-def build_dataset_gallery(
-        dataset_id: int,
-        yaml_path: str | Path,
-        split_name: str = "train",
-        limit: int = 50,
-        offset: int = 0,
-        base_url: str = "http://127.0.0.1:8000",
-        class_ids: set[int] | None = None,
-        fallback_task: TaskType | None = None,
-        filenames: set[str] | None = None,
-) -> tuple[List[Dict[str, Any]], int]:
+def build_dataset_gallery(dataset_id: int,
+                          yaml_path: str | Path,
+                          split_name: str = "train",
+                          limit: int = 50,
+                          offset: int = 0,
+                          base_url: str = "http://127.0.0.1:8000",
+                          class_ids: set[int] | None = None,
+                          fallback_task: TaskType | None = None,
+                          filenames: set[str] | None = None) -> tuple[List[Dict[str, Any]], int]:
     resolved_yaml = resolve_yaml_path(yaml_path)
     root = resolve_dataset_root(resolved_yaml.parent)
 

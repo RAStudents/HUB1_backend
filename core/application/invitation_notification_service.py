@@ -8,16 +8,15 @@ _ROLE_LABELS = {
 
 
 class InvitationNotificationService:
-    def __init__(self, email_service: Any):
+    def __init__(self,
+                 email_service: Any):
         self.email = email_service
 
-    def send_dataset_invitation(
-        self,
-        to_email: str,
-        dataset_name: str,
-        role: str,
-        inviter_name: str,
-    ) -> None:
+    def send_dataset_invitation(self,
+                                to_email: str,
+                                dataset_name: str,
+                                role: str,
+                                inviter_name: str) -> None:
         role_label = _ROLE_LABELS.get(role)
         if role_label is None:
             raise ValueError("Нельзя отправить приглашение с этой ролью")

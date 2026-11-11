@@ -21,16 +21,15 @@ def _aware(value: datetime | str | None) -> datetime | None:
 
 
 class AuthTokenRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def store_refresh(
-        self,
-        user_id: int,
-        token_hash: str,
-        family_id: str,
-        expires_at: datetime,
-    ) -> int:
+    def store_refresh(self,
+                      user_id: int,
+                      token_hash: str,
+                      family_id: str,
+                      expires_at: datetime) -> int:
         result = self.db.execute(
             refresh_tokens_table.insert().values(
                 user_id=user_id,
@@ -42,13 +41,15 @@ class AuthTokenRepository:
         self.db.commit()
         return result.inserted_primary_key[0]
 
-    def get_refresh_by_hash(self, token_hash: str):
+    def get_refresh_by_hash(self,
+                            token_hash: str):
         query = refresh_tokens_table.select().where(
             refresh_tokens_table.c.token_hash == token_hash
         )
         return self.db.execute(query).fetchone()
 
-    def claim_refresh(self, token_id: int) -> bool:
+    def claim_refresh(self,
+                      token_id: int) -> bool:
         """Один refresh можно обменять только один раз."""
         result = self.db.execute(
             refresh_tokens_table.update()
@@ -61,7 +62,9 @@ class AuthTokenRepository:
         self.db.commit()
         return result.rowcount == 1
 
-    def revoke_refresh(self, token_id: int, replaced_by_id: int | None = None) -> None:
+    def revoke_refresh(self,
+                       token_id: int,
+                       replaced_by_id: int | None = None) -> None:
         self.db.execute(
             refresh_tokens_table.update()
             .where(refresh_tokens_table.c.id == token_id)
@@ -69,7 +72,8 @@ class AuthTokenRepository:
         )
         self.db.commit()
 
-    def revoke_family(self, family_id: str) -> None:
+    def revoke_family(self,
+                      family_id: str) -> None:
         now = datetime.now(timezone.utc)
         self.db.execute(
             refresh_tokens_table.update()
@@ -81,7 +85,8 @@ class AuthTokenRepository:
         )
         self.db.commit()
 
-    def revoke_all_refresh_for_user(self, user_id: int) -> None:
+    def revoke_all_refresh_for_user(self,
+                                    user_id: int) -> None:
         now = datetime.now(timezone.utc)
         self.db.execute(
             refresh_tokens_table.update()
@@ -93,7 +98,8 @@ class AuthTokenRepository:
         )
         self.db.commit()
 
-    def is_access_revoked(self, jti: str) -> bool:
+    def is_access_revoked(self,
+                          jti: str) -> bool:
         row = self.db.execute(
             select(revoked_access_tokens_table.c.expires_at).where(
                 revoked_access_tokens_table.c.jti == jti
@@ -113,7 +119,10 @@ class AuthTokenRepository:
             return False
         return True
 
-    def revoke_access(self, jti: str, user_id: int, expires_at: datetime) -> None:
+    def revoke_access(self,
+                      jti: str,
+                      user_id: int,
+                      expires_at: datetime) -> None:
         existing = self.db.execute(
             select(revoked_access_tokens_table.c.jti).where(
                 revoked_access_tokens_table.c.jti == jti

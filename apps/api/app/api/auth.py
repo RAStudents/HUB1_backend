@@ -1,28 +1,30 @@
 # apps/api/app/api/auth.py
 
+import os
+import jwt
+import time
+import httpx
 import hashlib
 import logging
-import os
 import secrets
-import time
-from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 from urllib.parse import quote
+from datetime import datetime, timedelta, timezone
 
-import httpx
-import jwt
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from apps.api.app.deps import CurrentUser, get_auth_service, get_auth_token_repo, get_current_user, get_s3_client
 from apps.api.app.errors import client_error
+from apps.api.app.deps import CurrentUser, get_auth_service, get_auth_token_repo, get_current_user, get_s3_client
 from apps.api.app.schemas.auth import LoginRequest, LogoutRequest, NameUpdateRequest, RefreshRequest, RegisterRequest
+
 from core.application.auth_service import AuthService
-from core.infrastructure.auth.tokens import decode_access_claims, jwt_secret
+
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.s3.keys import user_avatar_key
+from core.infrastructure.auth.tokens import decode_access_claims, jwt_secret
 
 
 logger = logging.getLogger(__name__)

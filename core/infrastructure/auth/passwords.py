@@ -28,7 +28,8 @@ def hash_password(password: str) -> str:
     return f"{_PBKDF2_PREFIX}${_PBKDF2_ITERATIONS}${salt}${digest.hex()}"
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str,
+                    hashed_password: str) -> bool:
     """Проверяет и новый pbkdf2, и старые salt$sha256, пока человек не войдёт заново."""
     if not isinstance(plain_password, str) or not isinstance(hashed_password, str):
         return False
@@ -53,7 +54,8 @@ def needs_rehash(hashed_password: str) -> bool:
     return bool(salt) and bool(expected) and "$" not in expected
 
 
-def _verify_pbkdf2(plain_password: str, hashed_password: str) -> bool:
+def _verify_pbkdf2(plain_password: str,
+                   hashed_password: str) -> bool:
     prefix, iterations, salt, expected = hashed_password.split("$", 3)
     if prefix != _PBKDF2_PREFIX:
         return False
@@ -69,7 +71,8 @@ def _verify_pbkdf2(plain_password: str, hashed_password: str) -> bool:
     return secrets.compare_digest(digest.hex(), expected)
 
 
-def _verify_legacy_sha256(plain_password: str, hashed_password: str) -> bool:
+def _verify_legacy_sha256(plain_password: str,
+                          hashed_password: str) -> bool:
     salt, expected = hashed_password.split("$", 1)
     if not salt or not expected:
         return False
