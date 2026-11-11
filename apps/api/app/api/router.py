@@ -1,0 +1,33 @@
+﻿# apps/api/app/api/router.py
+
+import logging
+from fastapi import APIRouter
+
+from apps.api.app.api import (
+    auth,
+    datasets,
+    samples,
+    annotations,
+    export,
+    locks,
+    members,
+    notifications,
+    review,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+api_router = APIRouter(prefix="/api")
+
+# Подключаем модульные роутеры MVP
+api_router.include_router(auth.router)
+api_router.include_router(datasets.router)
+api_router.include_router(samples.router)
+api_router.include_router(annotations.router)
+api_router.include_router(export.router)
+api_router.include_router(members.router)
+api_router.include_router(locks.router)
+api_router.include_router(notifications.router)
+api_router.include_router(review.router)
