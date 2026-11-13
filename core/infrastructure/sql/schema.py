@@ -52,6 +52,7 @@ memberships_table = Table(
     Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("role", String(50), nullable=False),  # owner / labeler / observer
+    Column("status", String(20), server_default="accepted", nullable=False),
     UniqueConstraint("dataset_id", "user_id", name="uq_dataset_user_membership"),
 )
 

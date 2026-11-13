@@ -28,10 +28,10 @@ class InvitationNotificationService:
                 subject=f"Вас пригласили в датасет «{dataset_name}»",
                 body=(
                     f"Здравствуйте!\n\n"
-                    f"{inviter_name} добавил(а) вас в датасет «{dataset_name}» "
+                    f"{inviter_name} приглашает вас в датасет «{dataset_name}» "
                     f"в роли {role_label}.\n\n"
-                    "Войдите в HUB под этим email, чтобы открыть датасет "
-                    "в разделе «Доступные мне»."
+                    "Войдите в HUB под этим email и примите приглашение, "
+                    "чтобы получить доступ к датасету."
                 ),
             )
         except ValueError as exc:

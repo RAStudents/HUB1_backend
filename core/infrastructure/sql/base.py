@@ -29,6 +29,17 @@ Base = declarative_base()
 def init_db() -> None:
     """Создаёт все таблицы в базе данных (если они ещё не существуют)."""
     metadata.create_all(bind=engine)
+    membership_columns = {
+        column["name"] for column in inspect(engine).get_columns("memberships")
+    }
+    if "status" not in membership_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE memberships "
+                    "ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'accepted'"
+                )
+            )
     export_columns = {column["name"] for column in inspect(engine).get_columns("exports")}
     missing_export_columns = {
         "total_samples": "INTEGER NOT NULL DEFAULT 0",

@@ -90,6 +90,24 @@ class NotificationRepository:
         self.db.commit()
         return result.rowcount
 
+    def mark_dataset_invitation_read(self,
+                                    user_id: int,
+                                    dataset_id: int,
+                                    commit: bool = True) -> int:
+        result = self.db.execute(
+            notifications_table.update()
+            .where(
+                notifications_table.c.user_id == user_id,
+                notifications_table.c.dataset_id == dataset_id,
+                notifications_table.c.type == "dataset_invitation",
+                notifications_table.c.is_read.is_(False),
+            )
+            .values(is_read=True)
+        )
+        if commit:
+            self.db.commit()
+        return result.rowcount
+
     def commit(self) -> None:
         self.db.commit()
 

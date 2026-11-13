@@ -21,6 +21,10 @@ class MembershipService:
                      dataset_id: int) -> list[dict]:
         return self.memberships.list_members(dataset_id=dataset_id)
 
+    def list_pending_invitations(self,
+                                 user_id: int) -> list[dict]:
+        return self.memberships.list_pending_invitations(user_id=user_id)
+
     def add_member(self,
                    dataset_id: int,
                    email: str,
@@ -35,11 +39,11 @@ class MembershipService:
                 "зарегистрироваться."
             )
 
-        if self.memberships.get_user_role(
+        if self.memberships.get_membership_status(
             dataset_id=dataset_id,
             user_id=user.id,
         ) is not None:
-            raise ValueError("Пользователь уже состоит в этом датасете")
+            raise ValueError("Пользователь уже состоит в датасете или ожидает приглашения")
 
         inviter = self.memberships.get_user_by_id(user_id=inviter_user_id)
         if inviter is None:
@@ -51,6 +55,7 @@ class MembershipService:
                 dataset_id=dataset_id,
                 user_id=user.id,
                 role=role,
+                status="pending",
                 commit=False,
             )
             notification_id = self.notifications.create(
@@ -58,8 +63,9 @@ class MembershipService:
                 notification_type="dataset_invitation",
                 title=f"Приглашение в датасет «{dataset_name}»",
                 message=(
-                    f"{inviter.name} добавил(а) вас в датасет "
-                    f"«{dataset_name}» в роли {_ROLE_LABELS[role]}."
+                    f"{inviter.name} приглашает вас в датасет "
+                    f"«{dataset_name}» в роли {_ROLE_LABELS[role]}. "
+                    "Примите приглашение, чтобы получить доступ."
                 ),
                 dataset_id=dataset_id,
                 commit=False,
@@ -67,11 +73,13 @@ class MembershipService:
             self.memberships.commit()
         except IntegrityError:
             self.memberships.rollback()
-            if self.memberships.get_user_role(
+            if self.memberships.get_membership_status(
                 dataset_id=dataset_id,
                 user_id=user.id,
             ) is not None:
-                raise ValueError("Пользователь уже состоит в этом датасете") from None
+                raise ValueError(
+                    "Пользователь уже состоит в датасете или ожидает приглашения"
+                ) from None
             raise
 
         member = self._get_member(dataset_id, user.id)
@@ -79,16 +87,60 @@ class MembershipService:
         member["inviter_name"] = inviter.name
         return member
 
+    def accept_invitation(self,
+                          dataset_id: int,
+                          user_id: int) -> None:
+        if self.memberships.get_membership_status(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        ) != "pending":
+            raise LookupError("Ожидающее приглашение не найдено")
+
+        if not self.memberships.set_membership_status(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            current_status="pending",
+            status="accepted",
+        ):
+            raise LookupError("Ожидающее приглашение не найдено")
+
+        self.notifications.mark_dataset_invitation_read(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            commit=False,
+        )
+        self.memberships.commit()
+
+    def decline_invitation(self,
+                           dataset_id: int,
+                           user_id: int) -> None:
+        if not self.memberships.delete_pending_invitation(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        ):
+            raise LookupError("Ожидающее приглашение не найдено")
+
+        self.notifications.mark_dataset_invitation_read(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            commit=False,
+        )
+        self.memberships.commit()
+
     def update_member_role(self,
                            dataset_id: int,
                            user_id: int,
                            role: MemberRole) -> dict:
         self._validate_assignable_role(role)
+        membership_status = self.memberships.get_membership_status(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        )
         current_role = self.memberships.get_user_role(
             dataset_id=dataset_id,
             user_id=user_id,
         )
-        if current_role is None:
+        if membership_status is None:
             raise LookupError("Участник датасета не найден")
         if current_role == "owner":
             raise ValueError("Нельзя изменить роль владельца датасета")
@@ -103,14 +155,24 @@ class MembershipService:
     def remove_member(self,
                       dataset_id: int,
                       user_id: int) -> None:
+        membership_status = self.memberships.get_membership_status(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        )
         current_role = self.memberships.get_user_role(
             dataset_id=dataset_id,
             user_id=user_id,
         )
-        if current_role is None:
+        if membership_status is None:
             raise LookupError("Участник датасета не найден")
         if current_role == "owner":
             raise ValueError("Нельзя удалить владельца датасета")
+        if membership_status == "pending":
+            self.notifications.mark_dataset_invitation_read(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                commit=False,
+            )
         self.memberships.remove_member(dataset_id=dataset_id, user_id=user_id)
 
     def _get_member(self,
