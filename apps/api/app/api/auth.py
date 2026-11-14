@@ -20,6 +20,7 @@ from apps.api.app.errors import client_error
 from apps.api.app.deps import CurrentUser, get_auth_service, get_auth_token_repo, get_current_user, get_s3_client
 from apps.api.app.schemas.auth import LoginRequest, LogoutRequest, NameUpdateRequest, RefreshRequest, RegisterRequest
 
+from core.config import LOCAL_API_BASE_URL
 from core.application.auth_service import AuthService
 
 from core.infrastructure.s3.client import S3Client
@@ -36,7 +37,7 @@ optional_security = HTTPBearer(auto_error=False)
 YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID", "").strip()
 YANDEX_CLIENT_SECRET = os.getenv("YANDEX_CLIENT_SECRET", "").strip()
 YANDEX_REDIRECT_URI = os.getenv(
-    "YANDEX_REDIRECT_URI", "http://127.0.0.1:8000/api/auth/yandex/callback"
+    "YANDEX_REDIRECT_URI", f"{LOCAL_API_BASE_URL}/api/auth/yandex/callback"
 ).strip()
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 MAX_AVATAR_PIXELS = 40_000_000

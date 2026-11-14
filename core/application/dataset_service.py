@@ -3,6 +3,7 @@
 import logging
 from typing import Any, List
 
+from core.config import LOCAL_API_BASE_URL
 from core.infrastructure.s3.client import media_url
 
 
@@ -47,7 +48,7 @@ class DatasetService:
 
     def list_user_datasets(self,
                            user_id: int,
-                           base_url: str = "http://127.0.0.1:8000") -> list[dict]: # TODO needs to rm fix link
+                           base_url: str = LOCAL_API_BASE_URL) -> list[dict]: # TODO needs to rm fix link
         """Собирает каталог датасетов для главной страницы пользователя."""
         dataset_ids = self.memberships.list_datasets_for_user(user_id=user_id)
         rows = self.datasets.list_by_ids(dataset_ids)

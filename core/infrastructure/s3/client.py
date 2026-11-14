@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from urllib.parse import quote
 
+from core.config import LOCAL_API_BASE_URL, LOCAL_HOST
 from core.infrastructure.auth.tokens import jwt_secret
 
 
@@ -17,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ORIGINS = (
     "http://localhost:8000",
-    "http://127.0.0.1:8000",
+    LOCAL_API_BASE_URL,
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    f"http://{LOCAL_HOST}:5173",
 )
 
 

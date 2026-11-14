@@ -121,6 +121,16 @@ hub/
   # exports/{export_id}.zip
 ```
 
+## Local host
+
+Set `LOCAL_HOST` in the backend `.env` to choose the host used by local URL defaults.
+It controls the backend base URL, the default Yandex callback URL, and local CORS origins.
+An explicit `YANDEX_REDIRECT_URI` still overrides the callback default.
+
+```env
+LOCAL_HOST=127.0.0.1
+```
+
 ## SMTP
 
 Для отправки писем настройте переменные окружения backend:
@@ -138,3 +148,22 @@ SMTP_TIMEOUT_SECONDS=10
 `SMTP_SECURITY` принимает `starttls` (по умолчанию), `ssl` или `none`; для `ssl` порт по умолчанию `465`, для остальных режимов — `587`. Логин и пароль можно не задавать для SMTP-сервера без авторизации. Приглашение создаёт постоянное уведомление в приложении и отправляет email. Если SMTP не настроен или недоступен, приглашение и уведомление в приложении сохраняются; ответ API сообщает `"email_notification_sent": false`, а backend записывает ошибку отправки в лог.
 
 Авторизованный пользователь получает свои уведомления через `GET /api/notifications` (параметры `page` и `page_size`; ответ содержит `unread_count`), отмечает одно уведомление прочитанным через `POST /api/notifications/{notification_id}/read` или отмечает все через `POST /api/notifications/read-all`. Чтение и отметка всегда ограничены текущим пользователем.
+
+## Согласие на обработку электронных пользовательских данных
+
+Backend хранит историю действий посетителя в `visitor_data_consent_events`, используя случайный
+HttpOnly-cookie `consent_visitor_id`; согласие не привязано к аккаунту. Cookie выдаётся
+публичным `GET /api/consent` и действует один год.
+`GET /api/consent` возвращает текст согласия (`consent_text`), последнее действие и текущую версию;
+также возвращает `policy_link_text` и `policy_url` для ссылки на страницу Политики.
+`POST /api/consent` принимает `{"action":"accepted"}`, `{"action":"rejected"}` или
+`{"action":"withdrawn"}`. Отозвать можно только принятое согласие. Повтор того же
+действия идемпотентен. При изменении текста согласия нужно увеличить
+`ELECTRONIC_USER_DATA_CONSENT_VERSION` в `apps/api/app/api/consent.py`.
+Публичная frontend-страница `/consent` показывает текст и позволяет принять,
+отклонить или отозвать согласие.
+На всех frontend-маршрутах до принятия согласия показывается cookie-уведомление
+со ссылкой на `/consent`; отказ или отзыв не скрывает уведомление.
+
+Публичный `GET /api/privacy-policy` отдаёт `title`, `subtitle` и текст Политики;
+frontend отображает его на странице `/privacy-policy`.

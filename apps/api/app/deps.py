@@ -90,6 +90,11 @@ def get_notification_repo(db=Depends(get_db_connection)):
     return NotificationRepository(db)
 
 
+def get_consent_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.consents import ConsentRepository
+    return ConsentRepository(db)
+
+
 def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
