@@ -108,6 +108,11 @@ def get_event_repo(db=Depends(get_db_connection)):
     return EventRepository(db)
 
 
+def get_comment_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.sample_comments import SampleCommentRepository
+    return SampleCommentRepository(db)
+
+
 def get_auth_token_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.auth_tokens import AuthTokenRepository
     return AuthTokenRepository(db)

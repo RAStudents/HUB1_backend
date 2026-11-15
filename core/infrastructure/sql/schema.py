@@ -129,6 +129,21 @@ events_table = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
+sample_comments_table = Table(
+    "sample_comments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
+    Column("sample_id", Integer, ForeignKey("samples.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("parent_id", Integer, ForeignKey("sample_comments.id", ondelete="CASCADE"), nullable=True),
+    Column("annotation_index", Integer, nullable=True),
+    Column("body", Text, nullable=False),
+    Column("resolved", Boolean, server_default="false", nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index("ix_sample_comments_dataset_sample", sample_comments_table.c.dataset_id, sample_comments_table.c.sample_id, sample_comments_table.c.id)
+
 notifications_table = Table(
     "notifications",
     metadata,

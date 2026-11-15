@@ -17,6 +17,7 @@ from apps.api.app.api import (
     invitations,
     consent,
     privacy_policy,
+    comments,
 )
 
 
@@ -38,3 +39,4 @@ api_router.include_router(notifications.router)
 api_router.include_router(invitations.router)
 api_router.include_router(consent.router)
 api_router.include_router(privacy_policy.router)
+api_router.include_router(comments.router)
