@@ -449,7 +449,7 @@ def complete_upload(request: Request,
         clean_filename(parts[1])
         if split_name != clean_split(req.split):
             raise ValueError("Некорректный split")
-        s3.safe_path(req.upload_key)
+        s3.validate_key(req.upload_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
 
