@@ -15,6 +15,7 @@ from apps.api.app.api import (
     members,
     notifications,
     invitations,
+    classes,
 )
 
 
@@ -34,3 +35,4 @@ api_router.include_router(media.router)
 api_router.include_router(members.router)
 api_router.include_router(notifications.router)
 api_router.include_router(invitations.router)
+api_router.include_router(classes.router)

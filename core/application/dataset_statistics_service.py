@@ -221,7 +221,6 @@ class DatasetStatisticsService:
                 annotation_dtos,
                 task=task,
                 class_names=names,
-                category=category,
             )
             images_dir, labels_dir = directories[split_name]
             label_path = labels_dir / f"{row.id}.txt"

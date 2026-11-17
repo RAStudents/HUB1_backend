@@ -439,6 +439,25 @@ class SampleRepository:
             .order_by(samples_table.c.id)
         ).fetchall()
 
+    def iter_statistics_rows(self,
+                             dataset_id: int) -> list:
+        return self.db.execute(
+            select(
+                samples_table.c.id,
+                samples_table.c.split,
+                samples_table.c.label_key,
+                sample_geometries_table.c.geometry_json,
+            )
+            .select_from(
+                samples_table.outerjoin(
+                    sample_geometries_table,
+                    samples_table.c.id == sample_geometries_table.c.sample_id,
+                )
+            )
+            .where(samples_table.c.dataset_id == dataset_id)
+            .order_by(samples_table.c.id)
+        ).fetchall()
+
     def list_by_stem(self,
                      dataset_id: int,
                      split: str,

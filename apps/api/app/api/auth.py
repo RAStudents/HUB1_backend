@@ -266,6 +266,7 @@ def yandex_login():
         "https://oauth.yandex.ru/authorize?response_type=code"
         f"&client_id={quote(YANDEX_CLIENT_ID, safe='')}"
         f"&redirect_uri={quote(YANDEX_REDIRECT_URI, safe='')}"
+        #"&force_confirm=yes"
         f"&state={quote(state, safe='')}"
     )
     return {"auth_url": auth_url}

@@ -15,6 +15,7 @@ from apps.api.app.deps import (
     get_class_repo,
     get_dataset_or_404,
     get_dataset_service,
+    get_dataset_statistics_service,
     get_import_job_repo,
     get_sample_repo,
     get_s3_client,
@@ -25,8 +26,10 @@ from apps.api.app.uploads import spool_upload
 from apps.api.app.schemas.import_job import ImportJobDTO
 from apps.api.app.import_tasks import run_new_dataset_import
 from apps.api.app.schemas.dataset import CreateDatasetRequest
+from apps.api.app.schemas.dataset_statistics import DatasetStatisticsDTO
 
 from core.application.dataset_service import DatasetService
+from core.application.dataset_statistics_service import DatasetStatisticsService
 from core.infrastructure.s3.client import S3Client
 from core.infrastructure.s3.keys import clean_filename, clean_split
 
@@ -95,6 +98,23 @@ def create_dataset(payload: CreateDatasetRequest,
         initial_classes=payload.classes,
     )
     return {"dataset_id": dataset_id, "message": "Датасет успешно создан в БД"}
+
+
+@router.get("/{dataset_id}/statistics", response_model=DatasetStatisticsDTO)
+def get_dataset_statistics(dataset_id: int,
+                           grid_size: int = Query(20, ge=1, le=100),
+                           _user: CurrentUser = Depends(
+                               require_dataset_role({"owner", "labeler", "observer"})
+                           ),
+                           dataset=Depends(get_dataset_or_404),
+                           service: DatasetStatisticsService = Depends(
+                               get_dataset_statistics_service
+                           )) -> DatasetStatisticsDTO:
+    return service.get_statistics(
+        dataset_id=dataset_id,
+        task=TaskType(dataset.task),
+        grid_size=grid_size,
+    )
 
 
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
