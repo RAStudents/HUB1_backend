@@ -129,6 +129,21 @@ events_table = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
+sample_comments_table = Table(
+    "sample_comments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
+    Column("sample_id", Integer, ForeignKey("samples.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("parent_id", Integer, ForeignKey("sample_comments.id", ondelete="CASCADE"), nullable=True),
+    Column("annotation_index", Integer, nullable=True),
+    Column("body", Text, nullable=False),
+    Column("resolved", Boolean, server_default="false", nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index("ix_sample_comments_dataset_sample", sample_comments_table.c.dataset_id, sample_comments_table.c.sample_id, sample_comments_table.c.id)
+
 notifications_table = Table(
     "notifications",
     metadata,
@@ -201,4 +216,20 @@ revoked_access_tokens_table = Table(
     Column("jti", String(64), primary_key=True),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
+)
+
+visitor_data_consent_events_table = Table(
+    "visitor_data_consent_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("visitor_id", String(36), nullable=False),
+    Column("version", String(32), nullable=False),
+    Column("action", String(16), nullable=False),  # accepted / rejected / withdrawn
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index(
+    "ix_visitor_data_consent_events_visitor_version_created",
+    visitor_data_consent_events_table.c.visitor_id,
+    visitor_data_consent_events_table.c.version,
+    visitor_data_consent_events_table.c.created_at,
 )

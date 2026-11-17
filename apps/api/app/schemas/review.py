@@ -13,6 +13,10 @@ class ReviewDecisionDTO(BaseModel):
     decision: Literal["accepted", "rejected"]
 
 
+class SampleStatusUpdateDTO(BaseModel):
+    status: Literal["unlabeled", "in_progress", "in_review", "accepted", "rejected"]
+
+
 class ReviewStatusDTO(BaseModel):
     sample_id: int
     status: str

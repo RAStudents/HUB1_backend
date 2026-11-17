@@ -90,6 +90,11 @@ def get_notification_repo(db=Depends(get_db_connection)):
     return NotificationRepository(db)
 
 
+def get_consent_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.consents import ConsentRepository
+    return ConsentRepository(db)
+
+
 def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
@@ -101,6 +106,11 @@ def get_import_job_repo(db=Depends(get_db_connection)):
 def get_event_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.events import EventRepository
     return EventRepository(db)
+
+
+def get_comment_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.sample_comments import SampleCommentRepository
+    return SampleCommentRepository(db)
 
 
 def get_auth_token_repo(db=Depends(get_db_connection)):

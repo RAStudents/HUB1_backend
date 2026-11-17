@@ -15,7 +15,13 @@ from apps.api.app.api import (
     members,
     notifications,
     invitations,
+<<<<<<< HEAD
     classes,
+=======
+    consent,
+    privacy_policy,
+    comments,
+>>>>>>> 181134b76b2ed44513c4d4d43f78cc8f7af02298
 )
 
 
@@ -35,4 +41,10 @@ api_router.include_router(media.router)
 api_router.include_router(members.router)
 api_router.include_router(notifications.router)
 api_router.include_router(invitations.router)
+<<<<<<< HEAD
 api_router.include_router(classes.router)
+=======
+api_router.include_router(consent.router)
+api_router.include_router(privacy_policy.router)
+api_router.include_router(comments.router)
+>>>>>>> 181134b76b2ed44513c4d4d43f78cc8f7af02298

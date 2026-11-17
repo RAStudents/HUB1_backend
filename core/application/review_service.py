@@ -91,6 +91,41 @@ class ReviewService:
         self._log(dataset_id, sample_id, user_id, "sample_reopened_for_revision")
         return target.value
 
+    def change_status(self,
+                      dataset_id: int,
+                      sample_id: int,
+                      user_id: int,
+                      new_status: str) -> str:
+        """Меняет статус кадра владельцем или наблюдателем без права править геометрию."""
+        role = self.memberships.get_user_role(dataset_id=dataset_id, user_id=user_id)
+        if role != "owner":
+            raise PermissionError("Менять статус может только владелец датасета")
+
+        sample = self.samples.get_by_id(dataset_id=dataset_id, sample_id=sample_id)
+        if sample is None:
+            raise LookupError("Кадр не найден")
+
+        try:
+            current = SampleStatusEnum(sample.status)
+            target = SampleStatusEnum(new_status)
+        except ValueError as exc:
+            raise ValueError("Неизвестный статус кадра") from exc
+
+        if current == target:
+            return target.value
+        if not StatusTransitionValidator.can_transition(current, target):
+            raise ValueError(f"Недопустимый переход статуса: {current.value} → {target.value}")
+        if target == SampleStatusEnum.IN_REVIEW and sample.parse_error:
+            raise ValueError("Сначала исправьте ошибку разбора разметки")
+        if not self.samples.set_status_if(
+            sample_id=sample_id,
+            expected=current.value,
+            status=target.value,
+        ):
+            raise ValueError("Статус кадра уже изменился")
+        self._log(dataset_id, sample_id, user_id, f"sample_status_changed_to_{target.value}")
+        return target.value
+
     def _log(self,
              dataset_id: int,
              sample_id: int,

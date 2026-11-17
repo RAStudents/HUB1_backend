@@ -13,6 +13,7 @@ from urllib.parse import quote
 from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
 
+from core.config import LOCAL_API_BASE_URL
 from core.infrastructure.cv.thumbs import render_thumbnail_array
 from core.infrastructure.media.yaml_safe import load_yaml_file
 
@@ -237,7 +238,7 @@ def build_dataset_gallery(dataset_id: int,
                           split_name: str = "train",
                           limit: int = 50,
                           offset: int = 0,
-                          base_url: str = "http://127.0.0.1:8000",
+                          base_url: str = LOCAL_API_BASE_URL,
                           class_ids: set[int] | None = None,
                           fallback_task: TaskType | None = None,
                           filenames: set[str] | None = None) -> tuple[List[Dict[str, Any]], int]:

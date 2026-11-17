@@ -83,6 +83,28 @@ class SampleRepository:
         self.db.execute(query)
         self.db.commit()
 
+    def update_split_and_keys(self,
+                              dataset_id: int,
+                              sample_id: int,
+                              split: str,
+                              image_key: str,
+                              label_key: str,
+                              thumb_key: str) -> None:
+        self.db.execute(
+            samples_table.update()
+            .where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.id == sample_id,
+            )
+            .values(
+                split=split,
+                image_key=image_key,
+                label_key=label_key,
+                thumb_key=thumb_key,
+            )
+        )
+        self.db.commit()
+
     def lock_sample(self,
                     sample_id: int,
                     user_id: int,
@@ -421,6 +443,15 @@ class SampleRepository:
     def get_geometries(self,
                        geometry_json: str | None) -> list[dict]:
         return json.loads(geometry_json) if geometry_json else []
+
+    def get_geometries_for_sample(self,
+                                  sample_id: int) -> list[dict]:
+        row = self.db.execute(
+            select(sample_geometries_table.c.geometry_json).where(
+                sample_geometries_table.c.sample_id == sample_id
+            )
+        ).first()
+        return self.get_geometries(row.geometry_json if row else None)
 
     def list_missing_geometries(self,
                                 dataset_id: int) -> list:

@@ -67,9 +67,11 @@ def startup_event():
     try:
         s3 = get_s3_client()
         s3.ensure_bucket()
-        print("[OK] S3 (MinIO) подключен, бакет готов.")
+        print(f"[OK] Storage ({'S3' if s3.is_remote else 'local'}) готов.")
     except Exception as exc:
-        print(f"[WARNING] Не удалось подключиться к S3 при старте: {exc}")
+        print(f"[ERROR] Не удалось проверить storage при старте: {exc}")
+        if get_s3_client().is_remote:
+            raise
 
 
 @app.get("/health", tags=["system"])

@@ -10,7 +10,7 @@ from apps.api.app.deps import (
     require_dataset_role,
 )
 from apps.api.app.errors import client_error
-from apps.api.app.schemas.review import ReviewDecisionDTO, ReviewStatusDTO
+from apps.api.app.schemas.review import ReviewDecisionDTO, ReviewStatusDTO, SampleStatusUpdateDTO
 from core.application.review_service import ReviewService
 
 
@@ -87,6 +87,32 @@ def reopen_sample_for_revision(dataset_id: int,
             dataset_id=dataset_id,
             sample_id=sample_id,
             user_id=user.id,
+        )
+        return ReviewStatusDTO(sample_id=sample_id, status=new_status)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=client_error(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=client_error(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=client_error(exc)) from exc
+
+
+@router.patch(
+    "/{sample_id}/status",
+    response_model=ReviewStatusDTO,
+    dependencies=[Depends(get_dataset_or_404)],
+)
+def change_sample_status(dataset_id: int,
+                         sample_id: int,
+                         payload: SampleStatusUpdateDTO,
+                         user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                         service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
+    try:
+        new_status = service.change_status(
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+            user_id=user.id,
+            new_status=payload.status,
         )
         return ReviewStatusDTO(sample_id=sample_id, status=new_status)
     except LookupError as exc:

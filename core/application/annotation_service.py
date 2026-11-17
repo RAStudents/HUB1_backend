@@ -196,4 +196,6 @@ class AnnotationService:
         return FrameAnnotationsDTO(
             sample_id=sample_id,
             items=instances_to_dtos(instances=instances, task=task),
+            saved=True,
+            saved_at=datetime.now(timezone.utc),
         )

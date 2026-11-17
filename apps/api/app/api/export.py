@@ -5,7 +5,7 @@ from io import BytesIO
 from urllib.parse import quote
 from acmenra_cv import TaskType
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from apps.api.app.deps import (
@@ -198,6 +198,12 @@ def download_export(dataset_id: int,
 
     if not str(record.s3_key).startswith(f"datasets/{int(dataset_id)}/exports/"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
+    if s3.is_remote:
+        try:
+            url = s3.get_presigned_url(record.s3_key, expires_in=300)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден") from exc
+        return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     try:
         zip_path = s3.safe_path(record.s3_key)
     except ValueError as exc:
