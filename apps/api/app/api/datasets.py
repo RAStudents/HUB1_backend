@@ -10,10 +10,12 @@ from acmenra_cv import TaskType
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_current_user,
     get_class_repo,
     get_dataset_or_404,
+    get_dataset_repo,
     get_dataset_service,
     get_dataset_statistics_service,
     get_import_job_repo,
@@ -97,11 +99,11 @@ def create_dataset(payload: CreateDatasetRequest,
         is_private=payload.is_private,
         initial_classes=payload.classes,
     )
-    return {"dataset_id": dataset_id, "message": "Датасет успешно создан в БД"}
+    return {"dataset_id": service.datasets.get_by_id(dataset_id).public_id, "message": "Датасет успешно создан в БД"}
 
 
 @router.get("/{dataset_id}/statistics", response_model=DatasetStatisticsDTO)
-def get_dataset_statistics(dataset_id: int,
+def get_dataset_statistics(dataset_id: DatasetId,
                            grid_size: int = Query(20, ge=1, le=100),
                            _user: CurrentUser = Depends(
                                require_dataset_role({"owner", "labeler", "observer"})
@@ -110,15 +112,17 @@ def get_dataset_statistics(dataset_id: int,
                            service: DatasetStatisticsService = Depends(
                                get_dataset_statistics_service
                            )) -> DatasetStatisticsDTO:
-    return service.get_statistics(
+    result = service.get_statistics(
         dataset_id=dataset_id,
         task=TaskType(dataset.task),
         grid_size=grid_size,
     )
 
+    return {**result, "dataset_id": dataset.public_id}
+
 
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_dataset(dataset_id: int,
+def delete_dataset(dataset_id: DatasetId,
                    user: CurrentUser = Depends(require_dataset_role({"owner"})),
                    dataset=Depends(get_dataset_or_404),
                    service: DatasetService = Depends(get_dataset_service),
@@ -134,7 +138,7 @@ def delete_dataset(dataset_id: int,
 
 
 @router.delete("/{dataset_id}/gallery-item", status_code=status.HTTP_204_NO_CONTENT)
-def delete_gallery_item(dataset_id: int,
+def delete_gallery_item(dataset_id: DatasetId,
                         filename: str = Query(...),
                         split: str = Query("train"),
                         user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -172,7 +176,8 @@ async def upload_and_save_dataset(request: Request,
                             is_private: bool = Form(True),
                             file: UploadFile = File(...),
                             user: CurrentUser = Depends(get_current_user),
-                            import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
+                            import_job_repo=Depends(get_import_job_repo),
+                            dataset_repo=Depends(get_dataset_repo)) -> ImportJobDTO:
     if not file.filename or Path(file.filename).suffix.lower() != ".zip":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,7 +211,7 @@ async def upload_and_save_dataset(request: Request,
 
     return ImportJobDTO(
         import_id=import_record.id,
-        dataset_id=import_record.dataset_id,
+        dataset_id=dataset_repo.get_by_id(import_record.dataset_id).public_id if import_record.dataset_id is not None else None,
         status=import_record.status,
         stage=import_record.stage,
         progress=import_record.progress,
@@ -222,7 +227,8 @@ async def upload_and_save_dataset(request: Request,
 @router.get("/imports/{import_id}", response_model=ImportJobDTO)
 def get_import_status(import_id: int,
                       user: CurrentUser = Depends(get_current_user),
-                      import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
+                      import_job_repo=Depends(get_import_job_repo),
+                            dataset_repo=Depends(get_dataset_repo)) -> ImportJobDTO:
     record = import_job_repo.get_by_id(import_id)
     if record is None or record.user_id != user.id:
         raise HTTPException(
@@ -231,7 +237,7 @@ def get_import_status(import_id: int,
         )
     return ImportJobDTO(
         import_id=record.id,
-        dataset_id=record.dataset_id,
+        dataset_id=dataset_repo.get_by_id(record.dataset_id).public_id if record.dataset_id is not None else None,
         status=record.status,
         stage=record.stage,
         progress=record.progress,
@@ -245,7 +251,7 @@ def get_import_status(import_id: int,
 
 
 @router.get("/{dataset_id}/gallery")
-def get_dataset_gallery(dataset_id: int,
+def get_dataset_gallery(dataset_id: DatasetId,
                         request: Request,
                         response: Response,
                         split: str = Query("train"),

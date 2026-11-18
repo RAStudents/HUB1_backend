@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 from typing import List
 
-from acmenra_ds import ImageParser
+from core.infrastructure.media.convert import validate_image_header
 from acmenra_cv import Drawer, Fill, Font, Instance, LabelPosition, Stroke, Style, TaskType
 
 
@@ -47,9 +47,12 @@ def read_image_unicode(image_path: Path) -> np.ndarray | None:
         path_obj = Path(image_path)
         if not path_obj.is_file():
             return None
+        if path_obj.stat().st_size > _MAX_IMAGE_BYTES:
+            return None
         raw_bytes = path_obj.read_bytes()
         if not raw_bytes or len(raw_bytes) > _MAX_IMAGE_BYTES:
             return None
+        validate_image_header(raw_bytes)
         buf = np.frombuffer(raw_bytes, dtype=np.uint8)
         frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
         if frame is None:
@@ -107,13 +110,10 @@ def render_thumbnail_bytes(image_path: Path,
                            task: TaskType,
                            jpeg_quality: int = 85,) -> bytes:
     """
-    Читает изображение (с поддержкой Unicode-путей и фоллбэком на ImageParser),
+    Читает проверенное изображение с поддержкой Unicode-путей,
     рисует маски через Drawer и возвращает готовые JPEG-байты для загрузки в S3.
     """
     frame = read_image_unicode(image_path)
-    if frame is None:
-        parser = ImageParser()
-        frame = parser.parse(path=image_path, is_strict=False)
 
     if frame is None:
         raise ValueError(f"Не удалось прочитать изображение: {image_path}")

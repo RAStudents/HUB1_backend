@@ -108,7 +108,7 @@ class MembershipRepository:
         owner = users_table.alias("owner")
         query = (
             select(
-                datasets_table.c.id.label("dataset_id"),
+                datasets_table.c.public_id.label("dataset_id"),
                 datasets_table.c.name.label("dataset_name"),
                 memberships_table.c.role,
                 owner.c.name.label("inviter_name"),

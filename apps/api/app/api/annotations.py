@@ -1,4 +1,4 @@
-﻿# apps/api/app/api/annotations.py
+# apps/api/app/api/annotations.py
 
 import logging
 from acmenra_cv import TaskType
@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from apps.api.app.errors import client_error
 from apps.api.app.schemas.annotation import FrameAnnotationsDTO
-from apps.api.app.deps import CurrentUser, get_annotation_service, get_dataset_or_404,  require_dataset_role
+from apps.api.app.deps import DatasetId, CurrentUser, get_annotation_service, get_dataset_or_404,  require_dataset_role
 
 from core.application.annotation_service import AnnotationService
 
@@ -21,7 +21,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=FrameAnnotationsDTO)
-def get_annotations(dataset_id: int,
+def get_annotations(dataset_id: DatasetId,
                     sample_id: int,
                     user: CurrentUser = Depends(
                         require_dataset_role({"owner", "labeler", "observer"})
@@ -44,7 +44,7 @@ def get_annotations(dataset_id: int,
 
 
 @router.put("", response_model=FrameAnnotationsDTO)
-def save_annotations(dataset_id: int,
+def save_annotations(dataset_id: DatasetId,
                      sample_id: int,
                      payload: FrameAnnotationsDTO,
                      user: CurrentUser = Depends(

@@ -24,7 +24,7 @@ class DatasetSplitStatisticsDTO(BaseModel):
 
 
 class DatasetStatisticsDTO(BaseModel):
-    dataset_id: int
+    dataset_id: str
     task: str
     grid_size: int
     image_count: int

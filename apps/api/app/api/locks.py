@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from apps.api.app.deps import CurrentUser, get_dataset_or_404, get_lock_service, require_dataset_role
+from apps.api.app.deps import DatasetId, CurrentUser, get_dataset_or_404, get_lock_service, require_dataset_role
 from apps.api.app.errors import client_error
 from core.application.lock_service import LockService
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/datasets/{dataset_id}/samples", tags=["locks"])
 
 
 @router.post("/{sample_id}/lock")
-def acquire_lock(dataset_id: int,
+def acquire_lock(dataset_id: DatasetId,
                  sample_id: int,
                  user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
                  dataset=Depends(get_dataset_or_404),
@@ -31,7 +31,7 @@ def acquire_lock(dataset_id: int,
 
 
 @router.delete("/{sample_id}/lock", status_code=status.HTTP_204_NO_CONTENT)
-def release_lock(dataset_id: int,
+def release_lock(dataset_id: DatasetId,
                  sample_id: int,
                  user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
                  dataset=Depends(get_dataset_or_404),

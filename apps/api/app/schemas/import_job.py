@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class ImportJobDTO(BaseModel):
     import_id: int
-    dataset_id: int | None = None
+    dataset_id: str | None = None
     status: Literal["queued", "processing", "completed", "failed"]
     stage: Literal[
         "queued",

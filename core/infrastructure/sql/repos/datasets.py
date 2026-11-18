@@ -53,6 +53,9 @@ class DatasetRepository:
         query = datasets_table.select().where(datasets_table.c.id == dataset_id)
         return self.db.execute(query).fetchone()
 
+    def get_by_public_id(self, public_id: str):
+        return self.db.execute(datasets_table.select().where(datasets_table.c.public_id == public_id)).fetchone()
+
     def delete(self,
                dataset_id: int) -> None:
         sample_ids = select(samples_table.c.id).where(

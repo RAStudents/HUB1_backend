@@ -2,11 +2,11 @@
 
 import smtplib
 import logging
-import smtplib
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_dataset_or_404,
     get_invitation_notification_service,
@@ -28,7 +28,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=list[DatasetMemberDTO])
-def list_dataset_members(dataset_id: int,
+def list_dataset_members(dataset_id: DatasetId,
                          _user: CurrentUser = Depends(require_dataset_role({"owner"})),
                          _dataset=Depends(get_dataset_or_404),
                          service: MembershipService = Depends(get_membership_service)) -> list[DatasetMemberDTO]:
@@ -40,7 +40,7 @@ def list_dataset_members(dataset_id: int,
     response_model=DatasetMemberDTO,
     status_code=status.HTTP_201_CREATED,
 )
-def add_dataset_member(dataset_id: int,
+def add_dataset_member(dataset_id: DatasetId,
                        payload: AddDatasetMemberDTO,
                        user: CurrentUser = Depends(require_dataset_role({"owner"})),
                        dataset=Depends(get_dataset_or_404),
@@ -86,7 +86,7 @@ def add_dataset_member(dataset_id: int,
     "/{member_user_id}",
     response_model=DatasetMemberDTO,
 )
-def update_dataset_member_role(dataset_id: int,
+def update_dataset_member_role(dataset_id: DatasetId,
                                member_user_id: int,
                                payload: UpdateDatasetMemberRoleDTO,
                                _user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -108,7 +108,7 @@ def update_dataset_member_role(dataset_id: int,
     "/{member_user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def remove_dataset_member(dataset_id: int,
+def remove_dataset_member(dataset_id: DatasetId,
                           member_user_id: int,
                           _user: CurrentUser = Depends(require_dataset_role({"owner"})),
                           _dataset=Depends(get_dataset_or_404),

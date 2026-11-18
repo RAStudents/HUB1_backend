@@ -1,6 +1,7 @@
 # core/infrastructure/sql/schema.py
 
 import logging
+from uuid import uuid4
 from sqlalchemy import (
     Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 )
@@ -27,6 +28,7 @@ datasets_table = Table(
     "datasets",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("public_id", String(36), nullable=False, unique=True, default=lambda: str(uuid4())),
     Column("name", String(255), nullable=False),
     Column("task", String(50), nullable=False),  # detect / obb / segment
     Column("owner_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),

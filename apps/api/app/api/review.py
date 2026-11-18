@@ -1,9 +1,10 @@
-﻿# apps/api/app/api/review.py
+# apps/api/app/api/review.py
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_dataset_or_404,
     get_review_service,
@@ -28,7 +29,7 @@ router = APIRouter(
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def submit_sample_for_review(dataset_id: int,
+def submit_sample_for_review(dataset_id: DatasetId,
                              sample_id: int,
                              user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
                              service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
@@ -52,7 +53,7 @@ def submit_sample_for_review(dataset_id: int,
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def decide_sample_review(dataset_id: int,
+def decide_sample_review(dataset_id: DatasetId,
                          sample_id: int,
                          payload: ReviewDecisionDTO,
                          user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -78,7 +79,7 @@ def decide_sample_review(dataset_id: int,
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def reopen_sample_for_revision(dataset_id: int,
+def reopen_sample_for_revision(dataset_id: DatasetId,
                                sample_id: int,
                                user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
                                service: ReviewService = Depends(get_review_service)) -> ReviewStatusDTO:
@@ -102,7 +103,7 @@ def reopen_sample_for_revision(dataset_id: int,
     response_model=ReviewStatusDTO,
     dependencies=[Depends(get_dataset_or_404)],
 )
-def change_sample_status(dataset_id: int,
+def change_sample_status(dataset_id: DatasetId,
                          sample_id: int,
                          payload: SampleStatusUpdateDTO,
                          user: CurrentUser = Depends(require_dataset_role({"owner"})),

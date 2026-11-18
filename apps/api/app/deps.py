@@ -2,9 +2,10 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Set
+from typing import Annotated, Callable, Set
+from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.application.annotation_service import AnnotationService
@@ -160,13 +161,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
 
 # --- Авторизация ---
 
+def resolve_dataset_id(public_dataset_id: Annotated[UUID, Path(alias="dataset_id")],
+                       dataset_repo=Depends(get_dataset_repo)) -> int:
+    dataset = dataset_repo.get_by_public_id(str(public_dataset_id))
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Датасет не найден")
+    return dataset.id
+
+
+DatasetId = Annotated[int, Depends(resolve_dataset_id)]
+
+
 def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     """
     Фабрика зависимости FastAPI: проверяет, что пользователь состоит в датасете
     и его роль входит в разрешённый набор ('owner', 'labeler', 'observer').
     """
     def role_dependency(
-        dataset_id: int,
+        dataset_id: DatasetId,
         user: CurrentUser = Depends(get_current_user),
         membership_repo=Depends(get_membership_repo),
     ) -> CurrentUser:
@@ -181,7 +193,7 @@ def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     return role_dependency
 
 
-def get_dataset_or_404(dataset_id: int,
+def get_dataset_or_404(dataset_id: DatasetId,
                        user: CurrentUser = Depends(get_current_user),
                        dataset_repo=Depends(get_dataset_repo),
                        membership_repo=Depends(get_membership_repo)):

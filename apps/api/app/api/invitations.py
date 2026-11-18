@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from apps.api.app.deps import CurrentUser, get_current_user, get_membership_service
+from apps.api.app.deps import DatasetId, CurrentUser, get_current_user, get_membership_service
 from apps.api.app.schemas.invitation import DatasetInvitationDTO
 from core.application.membership_service import MembershipService
 
@@ -15,7 +15,7 @@ def list_invitations(user: CurrentUser = Depends(get_current_user),
 
 
 @router.post("/{dataset_id}/accept", status_code=status.HTTP_204_NO_CONTENT)
-def accept_invitation(dataset_id: int,
+def accept_invitation(dataset_id: DatasetId,
                       user: CurrentUser = Depends(get_current_user),
                       service: MembershipService = Depends(get_membership_service)) -> Response:
     try:
@@ -29,7 +29,7 @@ def accept_invitation(dataset_id: int,
 
 
 @router.post("/{dataset_id}/decline", status_code=status.HTTP_204_NO_CONTENT)
-def decline_invitation(dataset_id: int,
+def decline_invitation(dataset_id: DatasetId,
                        user: CurrentUser = Depends(get_current_user),
                        service: MembershipService = Depends(get_membership_service)) -> Response:
     try:

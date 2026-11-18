@@ -8,7 +8,7 @@ class NotificationDTO(BaseModel):
     type: str
     title: str
     message: str
-    dataset_id: int | None
+    dataset_id: str | None
     is_read: bool
     created_at: datetime
 

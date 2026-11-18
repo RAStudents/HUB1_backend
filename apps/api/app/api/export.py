@@ -1,4 +1,4 @@
-﻿# apps/api/app/api/export.py
+# apps/api/app/api/export.py
 
 import logging
 from io import BytesIO
@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_class_repo,
     get_dataset_or_404,
@@ -37,7 +38,7 @@ def _normalize_split(split: str | None) -> str:
 
 
 @router.post("", response_model=ExportStatusDTO, status_code=status.HTTP_202_ACCEPTED)
-def start_export(dataset_id: int,
+def start_export(dataset_id: DatasetId,
                  background_tasks: BackgroundTasks,
                  payload: ExportRequestDTO | None = None,
                  user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -118,7 +119,7 @@ def start_export(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def list_export_classes(dataset_id: int,
+def list_export_classes(dataset_id: DatasetId,
                         class_repo=Depends(get_class_repo),
                         sample_repo=Depends(get_sample_repo)) -> list[ExportClassDTO]:
     classes = class_repo.list_for_dataset(dataset_id)
@@ -141,7 +142,7 @@ def list_export_classes(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def get_export_status(dataset_id: int,
+def get_export_status(dataset_id: DatasetId,
                       export_id: int,
                       request: Request,
                       export_repo=Depends(get_export_repo)) -> ExportStatusDTO:
@@ -153,7 +154,7 @@ def get_export_status(dataset_id: int,
     export_stage = getattr(record, "stage", record.status)
     download_url = (
         f"{str(request.base_url).rstrip('/')}"
-        f"/api/datasets/{dataset_id}/exports/{export_id}/download"
+        f"/api/datasets/{request.path_params['dataset_id']}/exports/{export_id}/download"
         if record.status == "completed" and record.s3_key
         else None
     )
@@ -187,7 +188,7 @@ def get_export_status(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def download_export(dataset_id: int,
+def download_export(dataset_id: DatasetId,
                     export_id: int,
                     dataset=Depends(get_dataset_or_404),
                     export_repo=Depends(get_export_repo),

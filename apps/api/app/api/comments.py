@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_comment_repo,
     get_dataset_or_404,
@@ -32,7 +33,7 @@ def _dto(row) -> SampleCommentDTO:
 
 
 @router.get("", response_model=list[SampleCommentDTO])
-def list_comments(dataset_id: int,
+def list_comments(dataset_id: DatasetId,
                   sample_id: int,
                   _user: CurrentUser = Depends(require_dataset_role({"owner", "labeler", "observer"})),
                   _dataset=Depends(get_dataset_or_404),
@@ -44,7 +45,7 @@ def list_comments(dataset_id: int,
 
 
 @router.post("", response_model=SampleCommentDTO, status_code=status.HTTP_201_CREATED)
-def add_comment(dataset_id: int,
+def add_comment(dataset_id: DatasetId,
                 sample_id: int,
                 payload: SampleCommentCreateDTO,
                 user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
@@ -75,7 +76,7 @@ def add_comment(dataset_id: int,
 
 
 @router.post("/{comment_id}/resolve", response_model=SampleCommentDTO)
-def resolve_comment(dataset_id: int,
+def resolve_comment(dataset_id: DatasetId,
                     sample_id: int,
                     comment_id: int,
                     resolved: bool = True,

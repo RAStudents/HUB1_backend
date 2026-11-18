@@ -128,12 +128,14 @@ class SampleRepository:
                             sample_id: int,
                             user_id: int,
                             lock_until: datetime,
-                            now: datetime) -> bool:
+                            now: datetime,
+                            allowed_statuses: set[str] | None = None) -> bool:
         result = self.db.execute(
             samples_table.update()
             .where(
                 samples_table.c.dataset_id == dataset_id,
                 samples_table.c.id == sample_id,
+                samples_table.c.status.in_(allowed_statuses if allowed_statuses is not None else {"unlabeled", "in_progress", "rejected"}),
                 or_(
                     samples_table.c.lock_user.is_(None),
                     samples_table.c.lock_until.is_(None),
@@ -152,6 +154,20 @@ class SampleRepository:
             return True
         self.db.rollback()
         return False
+
+    def renew_owned_lock(self, dataset_id: int, sample_id: int, user_id: int,
+                         now: datetime, lock_until: datetime) -> bool:
+        result = self.db.execute(
+            samples_table.update().where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.id == sample_id,
+                samples_table.c.status == "in_progress",
+                samples_table.c.lock_user == user_id,
+                samples_table.c.lock_until > now,
+            ).values(lock_until=lock_until)
+        )
+        self.db.commit()
+        return result.rowcount == 1
 
     def release_sample_lock(self,
                             dataset_id: int,

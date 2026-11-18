@@ -1,10 +1,11 @@
-﻿# apps/api/app/api/classes.py
+# apps/api/app/api/classes.py
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_class_repo,
     get_dataset_or_404,
@@ -25,7 +26,7 @@ class ClassNameRequest(BaseModel):
 
 
 @router.get("")
-def list_classes(dataset_id: int,
+def list_classes(dataset_id: DatasetId,
                  _user: CurrentUser = Depends(
                      require_dataset_role({"owner", "labeler", "observer"})
                  ),
@@ -40,7 +41,7 @@ def list_classes(dataset_id: int,
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def add_class(dataset_id: int,
+def add_class(dataset_id: DatasetId,
               payload: ClassNameRequest,
               _user: CurrentUser = Depends(
                   require_dataset_role({"owner", "labeler"})
@@ -61,7 +62,7 @@ def add_class(dataset_id: int,
 
 
 @router.patch("/{class_index}")
-def rename_class(dataset_id: int,
+def rename_class(dataset_id: DatasetId,
                  class_index: int,
                  payload: ClassNameRequest,
                  _user: CurrentUser = Depends(

@@ -225,3 +225,5 @@ __marimo__/
 
 *.db
 test/
+# Local database backups contain private data
+*.before-uuid-*.bak

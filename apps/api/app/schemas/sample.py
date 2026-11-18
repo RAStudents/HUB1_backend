@@ -35,7 +35,7 @@ class CompleteUploadRequest(BaseModel):
 class SampleCardDTO(BaseModel):
     id: int
     sample_id: Optional[int] = None
-    dataset_id: int
+    dataset_id: str
     stem: str
     split: str
     status: str

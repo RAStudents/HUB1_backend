@@ -112,11 +112,10 @@ class AnnotationService:
         lock_expired = lock_until and lock_until < now
         if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
-        self.samples.lock_sample(
-            sample_id=sample_id,
-            user_id=user_id,
-            lock_until=now + timedelta(minutes=20),
-        )
+        if not self.samples.renew_owned_lock(
+            dataset_id, sample_id, user_id, now, now + timedelta(minutes=20)
+        ):
+            raise PermissionError("Блокировка или статус кадра изменились")
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
         instances = dtos_to_instances(dtos=items, task=task, class_names=class_names)

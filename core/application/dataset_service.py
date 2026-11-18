@@ -62,7 +62,7 @@ class DatasetService:
             cover_url = media_url(thumb_key, base_url=base_url) if thumb_key else None
 
             catalog.append({
-                "id": row.id,
+                "id": row.public_id,
                 "name": row.name,
                 "task": row.task,
                 "description": row.description,

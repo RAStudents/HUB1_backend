@@ -17,6 +17,19 @@ CONVERT_EXTENSIONS = {".heic", ".heif", ".webp", ".bmp", ".tiff", ".tif"}
 _MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 
+def validate_image_header(content: bytes) -> None:
+    """Reject oversized rasters before any decoder materializes their pixels."""
+    if not content or len(content) > _MAX_IMAGE_BYTES:
+        raise ValueError("Изображение слишком большое или пустое")
+    try:
+        with Image.open(BytesIO(content)) as image:
+            width, height = image.size
+            if width < 1 or height < 1 or width * height > 40_000_000:
+                raise ValueError("Изображение превышает ограничение 40 млн пикселей")
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("Некорректное изображение") from exc
+
+
 def normalize_image_file(src_path: Path,
                          jpeg_quality: int = 92) -> tuple[bytes, str, str]:
     """
@@ -32,11 +45,15 @@ def normalize_image_file(src_path: Path,
     stem = src_path.stem
 
     try:
+        if src_path.stat().st_size > _MAX_IMAGE_BYTES:
+            raise ValueError("Изображение слишком большое")
         file_bytes = src_path.read_bytes()
     except Exception as exc:
         raise ValueError(f"Не удалось прочитать файл {src_path.name}") from exc
     if len(file_bytes) > _MAX_IMAGE_BYTES:
         raise ValueError(f"Изображение слишком большое: {src_path.name}")
+
+    validate_image_header(file_bytes)
 
     if ext in KEEP_EXTENSIONS:
         content_type = "image/png" if ext == ".png" else "image/jpeg"

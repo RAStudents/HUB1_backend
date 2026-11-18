@@ -29,13 +29,17 @@ class LockService:
                 dataset_id: int,
                 sample_id: int,
                 user_id: int) -> datetime:
-        self._require_editor(dataset_id, user_id)
+        role = self._require_editor(dataset_id, user_id)
         sample = self._sample(dataset_id, sample_id)
         now = datetime.now(timezone.utc)
         if self._held_by_other(sample, user_id, now):
             raise PermissionError("Кадр сейчас занят другим пользователем")
         until = now + LOCK_TTL
-        self.samples.lock_sample(sample_id=sample.id, user_id=user_id, lock_until=until)
+        allowed = {"unlabeled", "in_progress", "rejected"}
+        if role == "owner":
+            allowed.add("accepted")
+        if not self.samples.acquire_sample_lock(dataset_id, sample.id, user_id, until, now, allowed):
+            raise PermissionError("Статус или блокировка кадра не допускает редактирование")
         return until
 
     def release(self,
@@ -46,7 +50,7 @@ class LockService:
         sample = self._sample(dataset_id, sample_id)
         if sample.lock_user not in (None, user_id) and role != "owner":
             raise PermissionError("Снять чужую блокировку может только владелец")
-        self.samples.unlock_sample(sample.id)
+        self.samples.release_sample_lock(dataset_id, sample.id, None if role == "owner" else user_id)
 
     def _sample(self,
                 dataset_id: int,

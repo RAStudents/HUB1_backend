@@ -1,6 +1,6 @@
 from sqlalchemy import func, select
 
-from core.infrastructure.sql.schema import notifications_table
+from core.infrastructure.sql.schema import notifications_table, datasets_table
 
 
 class NotificationRepository:
@@ -35,7 +35,8 @@ class NotificationRepository:
                        offset: int,
                        limit: int) -> tuple[list, int, int]:
         rows = self.db.execute(
-            select(notifications_table)
+            select(*[c for c in notifications_table.c if c.name != "dataset_id"], datasets_table.c.public_id.label("dataset_id"))
+            .select_from(notifications_table.outerjoin(datasets_table, notifications_table.c.dataset_id == datasets_table.c.id))
             .where(notifications_table.c.user_id == user_id)
             .order_by(
                 notifications_table.c.created_at.desc(),

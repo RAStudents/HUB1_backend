@@ -10,6 +10,7 @@ from collections import Counter
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_current_user,
     get_annotation_repo,
@@ -54,7 +55,7 @@ _MAX_DIRECT_UPLOAD_FILES = 100
 
 @router.get("", response_model=GalleryPageDTO)
 def list_gallery_samples(request: Request,
-                         dataset_id: int,
+                         dataset_id: DatasetId,
                          split: Optional[str] = Query(None, description="train | val | test | None (все)"),
                          sample_status: Optional[str] = Query(None, alias="status"),
                          search: Optional[str] = Query(None, max_length=255),
@@ -119,7 +120,7 @@ def list_gallery_samples(request: Request,
         items.append(SampleCardDTO(
             id=row.id,
             sample_id=row.id,
-            dataset_id=dataset_id,
+            dataset_id=dataset.public_id,
             stem=row.stem,
             split=row.split,
             status=row.status,
@@ -162,7 +163,7 @@ def list_gallery_samples(request: Request,
 
 @router.get("/{sample_id}", response_model=SampleEditorDTO)
 def get_sample_for_editor(request: Request,
-                          dataset_id: int,
+                          dataset_id: DatasetId,
                           sample_id: int,
                           user: CurrentUser = Depends(
                               require_dataset_role({"owner", "labeler", "observer"})
@@ -183,7 +184,7 @@ def get_sample_for_editor(request: Request,
     sample = SampleCardDTO(
         id=row.id,
         sample_id=row.id,
-        dataset_id=dataset_id,
+        dataset_id=dataset.public_id,
         stem=row.stem,
         split=row.split,
         status=row.status,
@@ -207,7 +208,7 @@ def get_sample_for_editor(request: Request,
 
 @router.patch("/{sample_id}/split", response_model=SampleCardDTO)
 def update_sample_split(request: Request,
-                        dataset_id: int,
+                        dataset_id: DatasetId,
                         sample_id: int,
                         payload: SampleSplitUpdateDTO,
                         user: CurrentUser = Depends(require_dataset_role({"owner", "labeler"})),
@@ -223,7 +224,7 @@ def update_sample_split(request: Request,
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=client_error(exc)) from exc
     if split_name == row.split:
         return SampleCardDTO(
-            id=row.id, sample_id=row.id, dataset_id=dataset_id, stem=row.stem,
+            id=row.id, sample_id=row.id, dataset_id=dataset.public_id, stem=row.stem,
             split=row.split, status=row.status, is_labeled=row.is_labeled,
             image_url=s3.get_presigned_url(row.image_key, base_url=str(request.base_url).rstrip("/")),
             thumb_url=s3.get_presigned_url(row.thumb_key, base_url=str(request.base_url).rstrip("/")),
@@ -256,7 +257,7 @@ def update_sample_split(request: Request,
         raise
     s3.delete_many(old_keys)
     return SampleCardDTO(
-        id=row.id, sample_id=row.id, dataset_id=dataset_id, stem=row.stem,
+        id=row.id, sample_id=row.id, dataset_id=dataset.public_id, stem=row.stem,
         split=split_name, status=row.status, is_labeled=row.is_labeled,
         image_url=s3.get_presigned_url(new_image_key, base_url=str(request.base_url).rstrip("/")),
         thumb_url=s3.get_presigned_url(new_thumb_key, base_url=str(request.base_url).rstrip("/")),
@@ -265,7 +266,7 @@ def update_sample_split(request: Request,
 
 
 @router.post("/import-zip", response_model=ImportJobDTO, status_code=status.HTTP_202_ACCEPTED)
-async def import_dataset_zip(dataset_id: int,
+async def import_dataset_zip(dataset_id: DatasetId,
                              background_tasks: BackgroundTasks,
                              file: UploadFile = File(...),
                              user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -294,7 +295,7 @@ async def import_dataset_zip(dataset_id: int,
 
     return ImportJobDTO(
         import_id=import_record.id,
-        dataset_id=dataset_id,
+        dataset_id=dataset.public_id,
         status=import_record.status,
         stage=import_record.stage,
         progress=import_record.progress,
@@ -308,7 +309,7 @@ async def import_dataset_zip(dataset_id: int,
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
-def get_upload_url(dataset_id: int,
+def get_upload_url(dataset_id: DatasetId,
                    req: UploadUrlRequest,
                    user: CurrentUser = Depends(require_dataset_role({"owner"})),
                    s3: S3Client = Depends(get_s3_client)) -> UploadUrlResponse:
@@ -323,7 +324,7 @@ def get_upload_url(dataset_id: int,
 
 @router.post("/upload", response_model=list[SampleCardDTO], status_code=status.HTTP_201_CREATED)
 async def upload_samples(request: Request,
-                         dataset_id: int,
+                         dataset_id: DatasetId,
                          files: list[UploadFile] = File(...),
                          split: str = Form("train"),
                          user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -407,7 +408,7 @@ async def upload_samples(request: Request,
             created.append(SampleCardDTO(
                 id=row.id,
                 sample_id=row.id,
-                dataset_id=dataset_id,
+                dataset_id=dataset.public_id,
                 stem=row.stem,
                 split=row.split,
                 status=row.status,
@@ -427,7 +428,7 @@ async def upload_samples(request: Request,
 
 @router.post("/complete-upload", response_model=SampleCardDTO)
 def complete_upload(request: Request,
-                    dataset_id: int,
+                    dataset_id: DatasetId,
                     req: CompleteUploadRequest,
                     user: CurrentUser = Depends(require_dataset_role({"owner"})),
                     dataset=Depends(get_dataset_or_404),
@@ -493,7 +494,7 @@ def complete_upload(request: Request,
 
     return SampleCardDTO(
         id=row.id,
-        dataset_id=dataset_id,
+        dataset_id=dataset.public_id,
         stem=row.stem,
         split=row.split,
         status=row.status,
@@ -510,7 +511,7 @@ def complete_upload(request: Request,
 
 
 @router.delete("/{sample_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_sample(dataset_id: int,
+def delete_sample(dataset_id: DatasetId,
                   sample_id: int,
                   user: CurrentUser = Depends(require_dataset_role({"owner"})),
                   s3: S3Client = Depends(get_s3_client),
