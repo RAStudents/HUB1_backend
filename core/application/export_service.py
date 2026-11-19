@@ -24,6 +24,20 @@ from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
 logger = logging.getLogger(__name__)
 
 
+def _public_error(exc: Exception) -> str:
+    text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    if (
+        isinstance(exc, (ValueError, PermissionError, LookupError))
+        and text
+        and len(text) <= 200
+        and "Traceback" not in text
+        and "/" not in text
+        and "\\" not in text
+    ):
+        return text
+    return "Не удалось выполнить операцию"
+
+
 class ExportService:
     def __init__(self,
                  s3_client: Any,
@@ -294,7 +308,7 @@ class ExportService:
             }
 
         except Exception as exc:
-            self.exports.mark_failed(export_id=export_id, error=str(exc))
+            self.exports.mark_failed(export_id=export_id, error=_public_error(exc))
             raise
 
     @staticmethod

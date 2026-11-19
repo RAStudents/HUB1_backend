@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class EventRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
     def log(self,

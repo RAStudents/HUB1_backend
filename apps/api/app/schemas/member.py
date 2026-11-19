@@ -35,5 +35,6 @@ class DatasetMemberDTO(BaseModel):
     email: str
     name: str
     role: MemberRole
+    status: Literal["pending", "accepted"]
     notification_id: int | None = None
     email_notification_sent: bool | None = None

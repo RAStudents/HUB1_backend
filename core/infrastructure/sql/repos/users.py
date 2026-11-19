@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class UserRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
     def get_by_email(self,
@@ -71,7 +72,9 @@ class UserRepository:
         self.db.execute(query)
         self.db.commit()
 
-    def update_password_hash(self, user_id: int, password_hash: str) -> None:
+    def update_password_hash(self,
+                             user_id: int,
+                             password_hash: str) -> None:
         """Меняет хэш после входа со старого sha256 на pbkdf2."""
         query = (
             users_table.update()

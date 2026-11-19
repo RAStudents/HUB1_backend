@@ -1,6 +1,7 @@
 ﻿# apps/api/app/schemas/annotation.py
 
 import logging
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -46,3 +47,5 @@ class AnnotationItemDTO(BaseModel):
 class FrameAnnotationsDTO(BaseModel):
     sample_id: int
     items: List[AnnotationItemDTO]
+    saved: bool = False
+    saved_at: Optional[datetime] = None

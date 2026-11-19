@@ -1,18 +1,18 @@
-import logging
+# apps/api/app/import_tasks.py
+
 import shutil
+import logging
 from pathlib import Path
 
 from acmenra_cv import TaskType
 
 from apps.api.app.deps import get_s3_client
+from apps.api.app.errors import client_error
+
 from core.application.dataset_service import DatasetService
 from core.application.import_service import ImportService, resolve_dataset_root
-from core.application.visualizer import (
-    STORAGE_DIR,
-    build_dataset_gallery,
-    load_acmenra_dataset,
-    resolve_yaml_path,
-)
+from core.application.visualizer import load_acmenra_dataset
+
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.sql.base import SessionLocal
 from core.infrastructure.sql.repos.annotations import AnnotationRepository
@@ -42,12 +42,10 @@ def _make_import_service(db) -> ImportService:
     )
 
 
-def run_existing_dataset_import(
-    import_id: int,
-    zip_path: str,
-    dataset_id: int,
-    task: str,
-) -> None:
+def run_existing_dataset_import(import_id: int,
+                                zip_path: str,
+                                dataset_id: int,
+                                task: str) -> None:
     try:
         with SessionLocal() as db:
             import_repo = ImportJobRepository(db)
@@ -81,20 +79,18 @@ def run_existing_dataset_import(
         logger.exception("Import job %s failed for dataset %s", import_id, dataset_id)
         with SessionLocal() as db:
             db.rollback()
-            ImportJobRepository(db).mark_failed(import_id, str(exc))
+            ImportJobRepository(db).mark_failed(import_id, client_error(exc))
     finally:
         Path(zip_path).unlink(missing_ok=True)
 
 
-def run_new_dataset_import(
-    import_id: int,
-    zip_path: str,
-    user_id: int,
-    name: str,
-    task: str,
-    is_private: bool,
-    base_url: str,
-) -> None:
+def run_new_dataset_import(import_id: int,
+                           zip_path: str,
+                           user_id: int,
+                           name: str,
+                           task: str,
+                           is_private: bool,
+                           base_url: str) -> None:
     dataset_id: int | None = None
     try:
         with SessionLocal() as db:
@@ -148,25 +144,6 @@ def run_new_dataset_import(
             import_repo.update_progress(
                 import_id,
                 dataset_id=dataset_id,
-                stage="building_gallery",
-                progress=99,
-                total_samples=result["total_samples"],
-                processed_samples=result["total_samples"],
-                imported_samples=result["imported_samples"],
-                parse_errors=result["parse_errors"],
-            )
-            persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
-            build_dataset_gallery(
-                dataset_id=dataset_id,
-                yaml_path=resolve_yaml_path(persistent_raw_dir),
-                split_name="train",
-                limit=50,
-                base_url=base_url,
-                fallback_task=dataset.task,
-            )
-            import_repo.update_progress(
-                import_id,
-                dataset_id=dataset_id,
                 status="completed",
                 stage="completed",
                 progress=100,
@@ -180,7 +157,7 @@ def run_new_dataset_import(
         if dataset_id is not None:
             try:
                 get_s3_client().delete_prefix(f"datasets/{dataset_id}/")
-                storage_path = STORAGE_DIR / f"dataset_{dataset_id}"
+                storage_path = Path("storage") / f"dataset_{dataset_id}"
                 if storage_path.exists():
                     shutil.rmtree(storage_path, ignore_errors=True)
                 with SessionLocal() as db:
@@ -189,6 +166,6 @@ def run_new_dataset_import(
                 logger.exception("Failed to clean up dataset %s after import failure", dataset_id)
         with SessionLocal() as db:
             db.rollback()
-            ImportJobRepository(db).mark_failed(import_id, str(exc))
+            ImportJobRepository(db).mark_failed(import_id, client_error(exc))
     finally:
         Path(zip_path).unlink(missing_ok=True)

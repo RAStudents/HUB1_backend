@@ -1,14 +1,10 @@
 # core/infrastructure/sql/repos/auth_tokens.py
 
 import logging
+from sqlalchemy import delete, select
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
-
-from core.infrastructure.sql.schema import (
-    refresh_tokens_table,
-    revoked_access_tokens_table,
-)
+from core.infrastructure.sql.schema import refresh_tokens_table, revoked_access_tokens_table
 
 
 logger = logging.getLogger(__name__)
@@ -25,16 +21,15 @@ def _aware(value: datetime | str | None) -> datetime | None:
 
 
 class AuthTokenRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def store_refresh(
-        self,
-        user_id: int,
-        token_hash: str,
-        family_id: str,
-        expires_at: datetime,
-    ) -> int:
+    def store_refresh(self,
+                      user_id: int,
+                      token_hash: str,
+                      family_id: str,
+                      expires_at: datetime) -> int:
         result = self.db.execute(
             refresh_tokens_table.insert().values(
                 user_id=user_id,
@@ -46,73 +41,39 @@ class AuthTokenRepository:
         self.db.commit()
         return result.inserted_primary_key[0]
 
-    def get_refresh_by_hash(self, token_hash: str):
+    def get_refresh_by_hash(self,
+                            token_hash: str):
         query = refresh_tokens_table.select().where(
             refresh_tokens_table.c.token_hash == token_hash
         )
         return self.db.execute(query).fetchone()
 
-    def rotate_refresh_token(
-        self,
-        token_hash: str,
-        new_token_hash: str,
-        expires_at: datetime,
-        now: datetime,
-    ):
-        """Atomically consume a refresh token and store its replacement."""
-        with self.db.begin():
-            claim = self.db.execute(
-                refresh_tokens_table.update()
-                .where(
-                    (refresh_tokens_table.c.token_hash == token_hash)
-                    & refresh_tokens_table.c.revoked_at.is_(None)
-                    & (refresh_tokens_table.c.expires_at > now)
-                )
-                .values(revoked_at=now)
+    def claim_refresh(self,
+                      token_id: int) -> bool:
+        """Один refresh можно обменять только один раз."""
+        result = self.db.execute(
+            refresh_tokens_table.update()
+            .where(
+                (refresh_tokens_table.c.id == token_id)
+                & refresh_tokens_table.c.revoked_at.is_(None)
             )
+            .values(revoked_at=datetime.now(timezone.utc))
+        )
+        self.db.commit()
+        return result.rowcount == 1
 
-            if claim.rowcount == 1:
-                row = self.get_refresh_by_hash(token_hash)
-                result = self.db.execute(
-                    refresh_tokens_table.insert().values(
-                        user_id=row.user_id,
-                        token_hash=new_token_hash,
-                        family_id=row.family_id,
-                        expires_at=expires_at,
-                    )
-                )
-                self.db.execute(
-                    refresh_tokens_table.update()
-                    .where(refresh_tokens_table.c.id == row.id)
-                    .values(replaced_by_id=result.inserted_primary_key[0])
-                )
-                return "rotated", row
+    def revoke_refresh(self,
+                       token_id: int,
+                       replaced_by_id: int | None = None) -> None:
+        self.db.execute(
+            refresh_tokens_table.update()
+            .where(refresh_tokens_table.c.id == token_id)
+            .values(revoked_at=datetime.now(timezone.utc), replaced_by_id=replaced_by_id)
+        )
+        self.db.commit()
 
-            row = self.get_refresh_by_hash(token_hash)
-            if row is None:
-                return "invalid", None
-            if row.revoked_at is not None:
-                self.db.execute(
-                    refresh_tokens_table.update()
-                    .where(
-                        (refresh_tokens_table.c.family_id == row.family_id)
-                        & refresh_tokens_table.c.revoked_at.is_(None)
-                    )
-                    .values(revoked_at=now)
-                )
-                return "reused", row
-
-            self.db.execute(
-                refresh_tokens_table.update()
-                .where(
-                    (refresh_tokens_table.c.id == row.id)
-                    & refresh_tokens_table.c.revoked_at.is_(None)
-                )
-                .values(revoked_at=now)
-            )
-            return "expired", row
-
-    def revoke_family(self, family_id: str) -> None:
+    def revoke_family(self,
+                      family_id: str) -> None:
         now = datetime.now(timezone.utc)
         self.db.execute(
             refresh_tokens_table.update()
@@ -124,7 +85,8 @@ class AuthTokenRepository:
         )
         self.db.commit()
 
-    def revoke_all_refresh_for_user(self, user_id: int) -> None:
+    def revoke_all_refresh_for_user(self,
+                                    user_id: int) -> None:
         now = datetime.now(timezone.utc)
         self.db.execute(
             refresh_tokens_table.update()
@@ -136,7 +98,8 @@ class AuthTokenRepository:
         )
         self.db.commit()
 
-    def is_access_revoked(self, jti: str) -> bool:
+    def is_access_revoked(self,
+                          jti: str) -> bool:
         row = self.db.execute(
             select(revoked_access_tokens_table.c.expires_at).where(
                 revoked_access_tokens_table.c.jti == jti
@@ -156,7 +119,10 @@ class AuthTokenRepository:
             return False
         return True
 
-    def revoke_access(self, jti: str, user_id: int, expires_at: datetime) -> None:
+    def revoke_access(self,
+                      jti: str,
+                      user_id: int,
+                      expires_at: datetime) -> None:
         existing = self.db.execute(
             select(revoked_access_tokens_table.c.jti).where(
                 revoked_access_tokens_table.c.jti == jti

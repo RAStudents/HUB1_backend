@@ -1,7 +1,5 @@
 # core/application/import_service.py
 
-import yaml
-import shutil
 import logging
 from pathlib import Path
 from typing import Any, Callable, List
@@ -15,6 +13,7 @@ from core.infrastructure.cv.mapper import instances_to_dtos
 from core.infrastructure.cv.thumbs import read_image_unicode, render_thumbnail_bytes
 
 from core.infrastructure.media.convert import CONVERT_EXTENSIONS, normalize_image_file
+from core.infrastructure.media.yaml_safe import load_yaml_file
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
 from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 
@@ -22,7 +21,6 @@ from core.infrastructure.s3.keys import image_key, label_key, thumb_key
 logger = logging.getLogger(__name__)
 
 
-STORAGE_DIR = Path("storage")
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
 
 
@@ -90,9 +88,9 @@ def build_acmenra_dataset(root: Path,
 
     if yaml_path is not None:
         try:
-            raw_cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            raw_cfg = load_yaml_file(yaml_path)
             raw_names = raw_cfg.get("names") or raw_cfg.get("classes") or []
-            
+
             if isinstance(raw_names, dict):
                 names = [str(raw_names[k]) for k in sorted(raw_names.keys())]
             elif isinstance(raw_names, list):
@@ -135,7 +133,8 @@ def build_acmenra_dataset(root: Path,
     return config
 
 
-def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
+def load_split_samples(config: Config,
+                       split: DataSplit) -> list[Sample]:
     if split == DataSplit.TRAIN:
         image_dir = config.get_train_images()
         label_dir = config.get_train_labels()
@@ -171,13 +170,11 @@ def load_split_samples(config: Config, split: DataSplit) -> list[Sample]:
 
 
 class ImportService:
-    def __init__(
-        self,
-        s3_client: Any,
-        sample_repo: Any,
-        class_repo: Any,
-        annotation_repo: Any | None = None,
-    ):
+    def __init__(self,
+                 s3_client: Any,
+                 sample_repo: Any,
+                 class_repo: Any,
+                 annotation_repo: Any | None = None):
         self.s3 = s3_client
         self.samples = sample_repo
         self.classes = class_repo
@@ -212,16 +209,10 @@ class ImportService:
             report("normalizing", 8)
             normalize_dataset_images(root)
 
-            report("copying", 14)
-            persistent_raw_dir = STORAGE_DIR / f"dataset_{dataset_id}" / "raw"
-            if persistent_raw_dir.exists():
-                shutil.rmtree(persistent_raw_dir, ignore_errors=True)
-            persistent_raw_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(root, persistent_raw_dir, dirs_exist_ok=True)
             report("discovering", 18)
 
             config = build_acmenra_dataset(
-                root=persistent_raw_dir,
+                root=root,
                 task=task,
                 fallback_names=existing_classes,
             )
@@ -252,7 +243,9 @@ class ImportService:
                                 is_strict=True,
                             )
                         except Exception as exc:
-                            parse_error = str(exc)
+                            parse_error = str(exc).splitlines()[0][:200]
+                            if "/" in parse_error or "\\" in parse_error:
+                                parse_error = "Ошибка разбора разметки"
                             errors_count += 1
 
                     img_bytes, img_filename, content_type = normalize_image_file(sample.image_path)
@@ -317,8 +310,8 @@ class ImportService:
                     imported_count += 1
                     processed_count += 1
                     if (
-                        processed_count % progress_interval == 0
-                        or processed_count == total_samples
+                            processed_count % progress_interval == 0
+                            or processed_count == total_samples
                     ):
                         report(
                             "importing",
@@ -332,5 +325,5 @@ class ImportService:
             "total_samples": total_samples,
             "parse_errors": errors_count,
             "classes": class_names,
-            "local_gallery_ready": True,
+            "local_gallery_ready": False,
         }

@@ -40,12 +40,10 @@ class ExportRepository:
         )
         return self.db.execute(query).fetchone()
 
-    def update_progress(
-        self,
-        export_id: int,
-        exported_samples: int,
-        stage: str = "processing",
-    ) -> None:
+    def update_progress(self,
+                        export_id: int,
+                        exported_samples: int,
+                        stage: str = "processing") -> None:
         query = (
             exports_table.update()
             .where(exports_table.c.id == export_id)
@@ -54,7 +52,9 @@ class ExportRepository:
         self.db.execute(query)
         self.db.commit()
 
-    def update_stage(self, export_id: int, stage: str) -> None:
+    def update_stage(self,
+                     export_id: int,
+                     stage: str) -> None:
         query = (
             exports_table.update()
             .where(exports_table.c.id == export_id)

@@ -1,14 +1,15 @@
-﻿# apps/api/app/api/export.py
+# apps/api/app/api/export.py
 
 import logging
 from io import BytesIO
 from urllib.parse import quote
 from acmenra_cv import TaskType
 
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
 
 from apps.api.app.deps import (
+    DatasetId,
     CurrentUser,
     get_class_repo,
     get_dataset_or_404,
@@ -17,6 +18,7 @@ from apps.api.app.deps import (
     get_sample_repo,
     get_s3_client,
 )
+
 from apps.api.app.schemas.export import ExportClassDTO, ExportRequestDTO, ExportStatusDTO
 from core.application.export_service import ExportService
 from core.infrastructure.s3.client import S3Client
@@ -25,17 +27,18 @@ from apps.api.app.deps import require_dataset_role
 
 logger = logging.getLogger(__name__)
 
-def _normalize_split(split: str | None) -> str:
-    normalized = (split or "train").lower()
-    return "val" if normalized == "valid" else normalized
-
 
 router = APIRouter(prefix="/datasets/{dataset_id}/exports",
                    tags=["export"])
 
 
+def _normalize_split(split: str | None) -> str:
+    normalized = (split or "train").lower()
+    return "val" if normalized == "valid" else normalized
+
+
 @router.post("", response_model=ExportStatusDTO, status_code=status.HTTP_202_ACCEPTED)
-def start_export(dataset_id: int,
+def start_export(dataset_id: DatasetId,
                  background_tasks: BackgroundTasks,
                  payload: ExportRequestDTO | None = None,
                  user: CurrentUser = Depends(require_dataset_role({"owner"})),
@@ -116,11 +119,9 @@ def start_export(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def list_export_classes(
-    dataset_id: int,
-    class_repo=Depends(get_class_repo),
-    sample_repo=Depends(get_sample_repo),
-) -> list[ExportClassDTO]:
+def list_export_classes(dataset_id: DatasetId,
+                        class_repo=Depends(get_class_repo),
+                        sample_repo=Depends(get_sample_repo)) -> list[ExportClassDTO]:
     classes = class_repo.list_for_dataset(dataset_id)
     class_counts = sample_repo.get_class_counts(dataset_id)
     return [
@@ -141,7 +142,7 @@ def list_export_classes(
         Depends(get_dataset_or_404),
     ],
 )
-def get_export_status(dataset_id: int,
+def get_export_status(dataset_id: DatasetId,
                       export_id: int,
                       request: Request,
                       export_repo=Depends(get_export_repo)) -> ExportStatusDTO:
@@ -153,7 +154,7 @@ def get_export_status(dataset_id: int,
     export_stage = getattr(record, "stage", record.status)
     download_url = (
         f"{str(request.base_url).rstrip('/')}"
-        f"/api/datasets/{dataset_id}/exports/{export_id}/download"
+        f"/api/datasets/{request.path_params['dataset_id']}/exports/{export_id}/download"
         if record.status == "completed" and record.s3_key
         else None
     )
@@ -187,7 +188,7 @@ def get_export_status(dataset_id: int,
         Depends(get_dataset_or_404),
     ],
 )
-def download_export(dataset_id: int,
+def download_export(dataset_id: DatasetId,
                     export_id: int,
                     dataset=Depends(get_dataset_or_404),
                     export_repo=Depends(get_export_repo),
@@ -196,20 +197,31 @@ def download_export(dataset_id: int,
     if record is None or record.status != "completed" or not record.s3_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
 
-    zip_bytes = s3.get_bytes(record.s3_key)
-    if zip_bytes is None:
+    if not str(record.s3_key).startswith(f"datasets/{int(dataset_id)}/exports/"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
+    if s3.is_remote:
+        try:
+            url = s3.get_presigned_url(record.s3_key, expires_in=300)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден") from exc
+        return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    try:
+        zip_path = s3.safe_path(record.s3_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден") from exc
+    if not zip_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден в хранилище")
 
     filename = dataset.name.strip().replace("/", "_").replace("\\", "_") or f"dataset_{dataset_id}"
     encoded_filename = quote(f"{filename}.zip", safe="")
-    return StreamingResponse(
-        BytesIO(zip_bytes),
+    return FileResponse(
+        zip_path,
         media_type="application/zip",
         headers={
             "Content-Disposition": (
                 f'attachment; filename="dataset_{dataset_id}.zip"; '
                 f"filename*=UTF-8''{encoded_filename}"
             ),
-            "Content-Length": str(len(zip_bytes)),
+            "X-Content-Type-Options": "nosniff",
         },
     )

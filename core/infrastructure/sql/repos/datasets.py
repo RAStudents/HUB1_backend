@@ -9,7 +9,9 @@ from core.infrastructure.sql.schema import (
     datasets_table,
     events_table,
     exports_table,
+    import_jobs_table,
     memberships_table,
+    sample_geometries_table,
     samples_table,
 )
 
@@ -51,10 +53,18 @@ class DatasetRepository:
         query = datasets_table.select().where(datasets_table.c.id == dataset_id)
         return self.db.execute(query).fetchone()
 
+    def get_by_public_id(self, public_id: str):
+        return self.db.execute(datasets_table.select().where(datasets_table.c.public_id == public_id)).fetchone()
+
     def delete(self,
                dataset_id: int) -> None:
         sample_ids = select(samples_table.c.id).where(
             samples_table.c.dataset_id == dataset_id
+        )
+        self.db.execute(
+            sample_geometries_table.delete().where(
+                sample_geometries_table.c.sample_id.in_(sample_ids)
+            )
         )
         self.db.execute(
             annotations_table.delete().where(
@@ -75,6 +85,9 @@ class DatasetRepository:
         )
         self.db.execute(
             exports_table.delete().where(exports_table.c.dataset_id == dataset_id)
+        )
+        self.db.execute(
+            import_jobs_table.delete().where(import_jobs_table.c.dataset_id == dataset_id)
         )
         self.db.execute(datasets_table.delete().where(datasets_table.c.id == dataset_id))
         self.db.commit()

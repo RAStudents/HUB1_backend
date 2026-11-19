@@ -2,19 +2,12 @@
 
 import math
 import logging
-from enum import EnumMeta
 from typing import List, Sequence
 
 from acmenra_cv import Box, Instance, Obb, Point, Polygon, TaskType
 from acmenra_ds import make_category_enum
 
-from apps.api.app.schemas.annotation import (
-    AnnotationItemDTO,
-    BoxDTO,
-    ObbDTO,
-    PointDTO,
-    PolygonDTO,
-)
+from apps.api.app.schemas.annotation import AnnotationItemDTO, BoxDTO, ObbDTO, PointDTO, PolygonDTO
 
 
 logger = logging.getLogger(__name__)
@@ -59,23 +52,45 @@ def instance_to_dto(instance: Instance,
     )
 
 
+def _unit(value: float,
+          name: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise ValueError(f"Координата {name} должна быть от 0 до 1")
+    return number
+
+
+def _positive_unit(value: float,
+                   name: str) -> float:
+    number = _unit(value, name)
+    if number <= 0.0:
+        raise ValueError(f"Размер {name} должен быть больше 0")
+    return number
+
+
 def dto_to_instance(dto: AnnotationItemDTO,
                     task: TaskType,
-                    class_names: Sequence[str],
-                    category: EnumMeta | None = None) -> Instance:
-    """
-    Собирает Instance из DTO фронтенда для сохранения в .txt и отрисовки Drawer-ом.
+                    class_names: Sequence[str]) -> Instance:
+    """Собирает Instance из DTO. Класс и координаты проверяются, ничего не подменяется."""
+    if not class_names or not isinstance(dto.class_id, int) or isinstance(dto.class_id, bool):
+        raise ValueError("Некорректный класс")
+    if dto.class_id < 0 or dto.class_id >= len(class_names):
+        raise ValueError("Неизвестный класс")
 
-    - Для OBB и SEGMENT создаёт технический пустой Box() (требование конструктора Instance).
-    - Угол OBB переводится из градусов в радианы.
-    """
-    category_enum = category or make_category_enum(class_names)
+    category_enum = make_category_enum(class_names)
     members_by_val = {item.value: item for item in category_enum}
-    label_enum = members_by_val.get(dto.class_id, list(category_enum)[0])
+    label_enum = members_by_val.get(dto.class_id)
+    if label_enum is None:
+        raise ValueError("Неизвестный класс")
     placeholder_box = Box()
 
     if task == TaskType.DETECT and dto.box is not None:
-        real_box = Box.from_xywhn([dto.box.x, dto.box.y, dto.box.width, dto.box.height])
+        real_box = Box.from_xywhn([
+            _unit(dto.box.x, "x"),
+            _unit(dto.box.y, "y"),
+            _positive_unit(dto.box.width, "width"),
+            _positive_unit(dto.box.height, "height"),
+        ])
         return Instance(
             id=dto.id,
             class_id=dto.class_id,
@@ -87,10 +102,16 @@ def dto_to_instance(dto: AnnotationItemDTO,
         )
 
     if task == TaskType.OBB and dto.obb is not None:
-        yaw_rad = math.radians(dto.obb.angle_deg)
-        real_obb = Obb.from_xywhrn(
-            [dto.obb.x, dto.obb.y, dto.obb.width, dto.obb.height, yaw_rad]
-        )
+        if not math.isfinite(float(dto.obb.angle_deg)):
+            raise ValueError("Некорректный угол")
+        yaw_rad = math.radians(float(dto.obb.angle_deg))
+        real_obb = Obb.from_xywhrn([
+            _unit(dto.obb.x, "x"),
+            _unit(dto.obb.y, "y"),
+            _positive_unit(dto.obb.width, "width"),
+            _positive_unit(dto.obb.height, "height"),
+            yaw_rad,
+        ])
         return Instance(
             id=dto.id,
             class_id=dto.class_id,
@@ -102,7 +123,12 @@ def dto_to_instance(dto: AnnotationItemDTO,
         )
 
     if task == TaskType.SEGMENT and dto.polygon is not None:
-        points = [Point.safe(x=pt.x, y=pt.y) for pt in dto.polygon.points]
+        if len(dto.polygon.points) < 3 or len(dto.polygon.points) > 5000:
+            raise ValueError("У полигона должно быть от 3 до 5000 точек")
+        points = [
+            Point.safe(x=_unit(pt.x, "x"), y=_unit(pt.y, "y"))
+            for pt in dto.polygon.points
+        ]
         real_poly = Polygon(points=points)
         return Instance(
             id=dto.id,
@@ -125,7 +151,6 @@ def instances_to_dtos(instances: List[Instance],
 
 def dtos_to_instances(dtos: List[AnnotationItemDTO],
                       task: TaskType,
-                      class_names: Sequence[str],
-                      category: EnumMeta | None = None) -> List[Instance]:
+                      class_names: Sequence[str]) -> List[Instance]:
     """Конвертирует список DTO в список Instance."""
-    return [dto_to_instance(d, task, class_names, category) for d in dtos]
+    return [dto_to_instance(d, task, class_names) for d in dtos]

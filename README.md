@@ -121,6 +121,71 @@ hub/
   # exports/{export_id}.zip
 ```
 
+## Local host
+
+Set `LOCAL_HOST` in the backend `.env` to choose the host used by local URL defaults.
+It controls the backend base URL, the default Yandex callback URL, and local CORS origins.
+An explicit `YANDEX_REDIRECT_URI` still overrides the callback default.
+
+```env
+LOCAL_HOST=127.0.0.1
+```
+
+## S3 / MinIO object storage
+
+Storage stays local by default. To switch the backend to AWS S3 or an S3-compatible service, install `boto3` in the backend's active Python environment and copy the S3 entries from the backend-root `.env.example` into the backend-root `.env` (the same folder as this README). Do not replace the rest of `.env`.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install boto3
+```
+
+Create the bucket in AWS or MinIO before starting the API; startup checks that it exists and fails if it cannot access it. The backend does not create buckets automatically. Set these values in `.env`:
+
+```env
+S3_BACKEND=s3
+S3_BUCKET=hub
+S3_REGION=us-east-1
+S3_ENDPOINT_URL=
+S3_PUBLIC_ENDPOINT_URL=
+S3_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID
+S3_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY
+S3_ADDRESSING_STYLE=auto
+```
+
+For **AWS S3**, replace `hub` with the exact bucket name and `us-east-1` with the bucket's AWS region. Keep both endpoint values empty and `S3_ADDRESSING_STYLE=auto`. Create an IAM user/access key restricted to this bucket, or use the server's IAM role and leave both access key values empty. The identity needs `s3:ListBucket` on `arn:aws:s3:::YOUR_BUCKET` and `s3:GetObject`, `s3:PutObject`, and `s3:DeleteObject` on `arn:aws:s3:::YOUR_BUCKET/*`.
+
+For **Timeweb Cloud S3**, the endpoint is `https://s3.twcstorage.ru` and the region is `ru-1`. Set `S3_BUCKET` to your bucket name, put the Timeweb `Access Key` and `Secret Key` in the credential variables above, and use:
+
+```env
+S3_REGION=ru-1
+S3_ENDPOINT_URL=https://s3.twcstorage.ru
+S3_PUBLIC_ENDPOINT_URL=https://s3.twcstorage.ru
+S3_ADDRESSING_STYLE=path
+```
+
+Timeweb shows the access keys in the bucket dashboard. Do not make the bucket public; signed URLs are used by the app.
+
+For **MinIO**, create a bucket (for example `hub`) and use the API endpoint reachable from the backend process:
+
+```env
+S3_BACKEND=s3
+S3_BUCKET=hub
+S3_REGION=us-east-1
+S3_ENDPOINT_URL=http://localhost:9000
+S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
+S3_ACCESS_KEY_ID=YOUR_MINIO_ACCESS_KEY
+S3_SECRET_ACCESS_KEY=YOUR_MINIO_SECRET_KEY
+S3_ADDRESSING_STYLE=path
+```
+
+If the API runs in Docker Compose, set `S3_ENDPOINT_URL` to the MinIO service name and internal port (for example `http://minio:9000`). Set `S3_PUBLIC_ENDPOINT_URL` to the matching MinIO URL reachable by the user's browser (for example `http://localhost:9000` for local development, or the public MinIO hostname in production). The backend uses the first endpoint for its own S3 requests and the public endpoint only when generating signed browser links. If MinIO uses TLS, use `https://` endpoints. Give the MinIO account permissions to list the bucket and read, write, and delete objects in it.
+
+After saving `.env`, restart the backend. The startup log should say `Storage (S3) готов.`. If it reports an error, check that the bucket already exists, the region and endpoint match the bucket service, and the credentials have the permissions above. Existing data under `local_s3_storage` is not copied automatically; upload/import it again or migrate those files into matching object keys in the bucket.
+
+Images and exports use short-lived signed URLs, and uploads use a signed PUT URL. Keep the bucket private; public bucket access is not required. If a browser uploads directly to the bucket, configure bucket CORS to allow the exact frontend origin, `PUT`, `GET`, `HEAD`, and the `Content-Type` request header. Do not use `*` origins for a production site.
+
+To return to local filesystem storage, set `S3_BACKEND=local` (or remove it) and restart the API.
+
 ## SMTP
 
 Для отправки писем настройте переменные окружения backend:
@@ -137,4 +202,27 @@ SMTP_TIMEOUT_SECONDS=10
 
 `SMTP_SECURITY` принимает `starttls` (по умолчанию), `ssl` или `none`; для `ssl` порт по умолчанию `465`, для остальных режимов — `587`. Логин и пароль можно не задавать для SMTP-сервера без авторизации. Приглашение создаёт постоянное уведомление в приложении и отправляет email. Если SMTP не настроен или недоступен, приглашение и уведомление в приложении сохраняются; ответ API сообщает `"email_notification_sent": false`, а backend записывает ошибку отправки в лог.
 
+При передаче логина/пароля требуется `ssl` или `starttls`; `none` допустим только для доверенного relay без авторизации. OAuth2 пока не поддерживается.
+
+Проверить соединение без отправки письма: `.\.venv\Scripts\python.exe -m core.infrastructure.email.check`. Шаблон — [.env.smtp.example](.env.smtp.example), инструкция и список данных для заказчика — [docs/smtp-setup.md](docs/smtp-setup.md).
+
 Авторизованный пользователь получает свои уведомления через `GET /api/notifications` (параметры `page` и `page_size`; ответ содержит `unread_count`), отмечает одно уведомление прочитанным через `POST /api/notifications/{notification_id}/read` или отмечает все через `POST /api/notifications/read-all`. Чтение и отметка всегда ограничены текущим пользователем.
+
+## Согласие на обработку электронных пользовательских данных
+
+Backend хранит историю действий посетителя в `visitor_data_consent_events`, используя случайный
+HttpOnly-cookie `consent_visitor_id`; согласие не привязано к аккаунту. Cookie выдаётся
+публичным `GET /api/consent` и действует один год.
+`GET /api/consent` возвращает текст согласия (`consent_text`), последнее действие и текущую версию;
+также возвращает `policy_link_text` и `policy_url` для ссылки на страницу Политики.
+`POST /api/consent` принимает `{"action":"accepted"}`, `{"action":"rejected"}` или
+`{"action":"withdrawn"}`. Отозвать можно только принятое согласие. Повтор того же
+действия идемпотентен. При изменении текста согласия нужно увеличить
+`ELECTRONIC_USER_DATA_CONSENT_VERSION` в `apps/api/app/api/consent.py`.
+Публичная frontend-страница `/consent` показывает текст и позволяет принять,
+отклонить или отозвать согласие.
+На всех frontend-маршрутах до принятия согласия показывается cookie-уведомление
+со ссылкой на `/consent`; отказ или отзыв не скрывает уведомление.
+
+Публичный `GET /api/privacy-policy` отдаёт `title`, `subtitle` и текст Политики;
+frontend отображает его на странице `/privacy-policy`.

@@ -2,9 +2,10 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Set
+from typing import Annotated, Callable, Set
+from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.application.annotation_service import AnnotationService
@@ -28,7 +29,7 @@ from core.infrastructure.sql.base import get_db
 logger = logging.getLogger(__name__)
 
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # Глобальный инстанс S3-клиента (поднимается один раз при старте)
 _s3_client = S3Client()
@@ -90,6 +91,11 @@ def get_notification_repo(db=Depends(get_db_connection)):
     return NotificationRepository(db)
 
 
+def get_consent_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.consents import ConsentRepository
+    return ConsentRepository(db)
+
+
 def get_export_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.exports import ExportRepository
     return ExportRepository(db)
@@ -101,6 +107,11 @@ def get_import_job_repo(db=Depends(get_db_connection)):
 def get_event_repo(db=Depends(get_db_connection)):
     from core.infrastructure.sql.repos.events import EventRepository
     return EventRepository(db)
+
+
+def get_comment_repo(db=Depends(get_db_connection)):
+    from core.infrastructure.sql.repos.sample_comments import SampleCommentRepository
+    return SampleCommentRepository(db)
 
 
 def get_auth_token_repo(db=Depends(get_db_connection)):
@@ -117,9 +128,16 @@ class CurrentUser:
         self.access_expires_at = access_expires_at
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security),
-                     token_repo=Depends(get_auth_token_repo)) -> CurrentUser:
-    """Декодирует JWT и отвергает отозванный access-токен."""
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(security),
+                     token_repo=Depends(get_auth_token_repo),
+                     user_repo=Depends(get_user_repo)) -> CurrentUser:
+    """Декодирует JWT, отвергает отозванный токен и удалённого пользователя."""
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     claims = decode_access_claims(credentials.credentials)
     if not claims or token_repo.is_access_revoked(claims["jti"]):
         raise HTTPException(
@@ -127,8 +145,15 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Недействительный или просроченный токен авторизации",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    user_id = int(claims["sub"])
+    if user_repo.get_by_id(user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный или просроченный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return CurrentUser(
-        id=int(claims["sub"]),
+        id=user_id,
         jti=claims["jti"],
         access_expires_at=datetime.fromtimestamp(claims["exp"], tz=timezone.utc),
     )
@@ -136,13 +161,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 # --- Авторизация ---
 
+def resolve_dataset_id(public_dataset_id: Annotated[UUID, Path(alias="dataset_id")],
+                       dataset_repo=Depends(get_dataset_repo)) -> int:
+    dataset = dataset_repo.get_by_public_id(str(public_dataset_id))
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Датасет не найден")
+    return dataset.id
+
+
+DatasetId = Annotated[int, Depends(resolve_dataset_id)]
+
+
 def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     """
     Фабрика зависимости FastAPI: проверяет, что пользователь состоит в датасете
     и его роль входит в разрешённый набор ('owner', 'labeler', 'observer').
     """
     def role_dependency(
-        dataset_id: int,
+        dataset_id: DatasetId,
         user: CurrentUser = Depends(get_current_user),
         membership_repo=Depends(get_membership_repo),
     ) -> CurrentUser:
@@ -157,12 +193,19 @@ def require_dataset_role(allowed_roles: Set[str]) -> Callable:
     return role_dependency
 
 
-def get_dataset_or_404(dataset_id: int,
+def get_dataset_or_404(dataset_id: DatasetId,
                        user: CurrentUser = Depends(get_current_user),
-                       dataset_repo=Depends(get_dataset_repo)):
-    """Проверяет существование датасета (защита от IDOR)."""
+                       dataset_repo=Depends(get_dataset_repo),
+                       membership_repo=Depends(get_membership_repo)):
+    """Нет датасета или нет роли в приватном датасете — один и тот же 404."""
     dataset = dataset_repo.get_by_id(dataset_id=dataset_id)
     if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Датасет не найден",
+        )
+    role = membership_repo.get_user_role(dataset_id=dataset_id, user_id=user.id)
+    if role is None and dataset.is_private:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Датасет не найден",
@@ -189,11 +232,10 @@ def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
     )
 
 
-def get_dataset_statistics_service(
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    s3: S3Client = Depends(get_s3_client),
-) -> DatasetStatisticsService:
+
+def get_dataset_statistics_service(sample_repo=Depends(get_sample_repo),
+                                   class_repo=Depends(get_class_repo),
+                                   s3: S3Client = Depends(get_s3_client)) -> DatasetStatisticsService:
     return DatasetStatisticsService(
         sample_repo=sample_repo,
         class_repo=class_repo,
@@ -201,21 +243,17 @@ def get_dataset_statistics_service(
     )
 
 
-def get_membership_service(
-    membership_repo=Depends(get_membership_repo),
-    notification_repo=Depends(get_notification_repo),
-) -> MembershipService:
+def get_membership_service(membership_repo=Depends(get_membership_repo),
+                           notification_repo=Depends(get_notification_repo)) -> MembershipService:
     return MembershipService(
         membership_repo=membership_repo,
         notification_repo=notification_repo,
     )
 
 
-def get_lock_service(
-    sample_repo=Depends(get_sample_repo),
-    membership_repo=Depends(get_membership_repo),
-    event_repo=Depends(get_event_repo),
-) -> LockService:
+def get_lock_service(sample_repo=Depends(get_sample_repo),
+                     membership_repo=Depends(get_membership_repo),
+                     event_repo=Depends(get_event_repo)) -> LockService:
     return LockService(
         sample_repo=sample_repo,
         membership_repo=membership_repo,
@@ -223,12 +261,10 @@ def get_lock_service(
     )
 
 
-def get_import_service(
-    s3: S3Client = Depends(get_s3_client),
-    sample_repo=Depends(get_sample_repo),
-    class_repo=Depends(get_class_repo),
-    annotation_repo=Depends(get_annotation_repo),
-) -> ImportService:
+def get_import_service(s3: S3Client = Depends(get_s3_client),
+                       sample_repo=Depends(get_sample_repo),
+                       class_repo=Depends(get_class_repo),
+                       annotation_repo=Depends(get_annotation_repo)) -> ImportService:
     return ImportService(
         s3_client=s3,
         sample_repo=sample_repo,
@@ -263,6 +299,11 @@ def get_export_service(s3: S3Client = Depends(get_s3_client),
         export_repo=export_repo,
         membership_repo=membership_repo,
     )
+
+
+def get_lock_service(sample_repo=Depends(get_sample_repo),
+                     membership_repo=Depends(get_membership_repo)) -> LockService:
+    return LockService(sample_repo=sample_repo, membership_repo=membership_repo)
 
 
 def get_review_service(sample_repo=Depends(get_sample_repo),
