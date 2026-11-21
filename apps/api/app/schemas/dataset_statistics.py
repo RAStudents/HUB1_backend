@@ -18,18 +18,16 @@ class DatasetAnnotationLocationsDTO(BaseModel):
 
 class DatasetSplitStatisticsDTO(BaseModel):
     image_count: int
+    labeled_count: int
+    status_counts: dict[str, int]
     annotation_count: int
     annotations_per_class: list[DatasetClassCountDTO]
     annotation_locations: DatasetAnnotationLocationsDTO
 
 
-class DatasetStatisticsDTO(BaseModel):
+class DatasetStatisticsDTO(DatasetSplitStatisticsDTO):
     dataset_id: str
     task: str
     grid_size: int
-    image_count: int
     images_by_split: dict[str, int]
-    annotation_count: int
-    annotations_per_class: list[DatasetClassCountDTO]
-    annotation_locations: DatasetAnnotationLocationsDTO
     splits: dict[str, DatasetSplitStatisticsDTO | None]

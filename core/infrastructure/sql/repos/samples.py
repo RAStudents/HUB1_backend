@@ -492,7 +492,8 @@ class SampleRepository:
             select(
                 samples_table.c.id,
                 samples_table.c.split,
-                samples_table.c.label_key,
+                samples_table.c.is_labeled,
+                samples_table.c.status,
                 sample_geometries_table.c.geometry_json,
             )
             .select_from(
