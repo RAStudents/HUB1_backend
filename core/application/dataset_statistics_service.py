@@ -1,6 +1,7 @@
 # core/application/dataset_statistics_service.py
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ from apps.api.app.schemas.annotation import AnnotationItemDTO
 from core.infrastructure.cv.labels import parse_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
+
+
+SPLITS = {"train": DataSplit.TRAIN, "val": DataSplit.VAL, "test": DataSplit.TEST}
 
 
 class DatasetStatisticsService:
@@ -38,6 +42,8 @@ class DatasetStatisticsService:
             f"dataset_class_{class_id}" for class_id in range(len(class_names))
         ] or ["dataset_class_empty"]
         category = make_category_enum(names_for_library)
+        labeled_counts: Counter[str] = Counter()
+        status_counts: dict[str, Counter[str]] = {name: Counter() for name in SPLITS}
         with scratch_dir(prefix=f"hub_statistics_{dataset_id}_") as root:
             samples_by_split = self._build_library_dataset(
                 root=root,
@@ -46,6 +52,8 @@ class DatasetStatisticsService:
                 names=names_for_library,
                 category=category,
                 class_count=len(class_names),
+                labeled_counts=labeled_counts,
+                status_counts=status_counts,
             )
             config = Config(
                 root=root,
@@ -88,28 +96,26 @@ class DatasetStatisticsService:
                 for class_id in range(len(class_names))
             ]
             split_statistics = {
-                "train": self._serialize_split_statistics(
-                    statistics.train,
+                name: self._serialize_split_statistics(
+                    getattr(statistics, name),
                     class_names,
                     names_for_library,
-                ),
-                "val": self._serialize_split_statistics(
-                    statistics.val,
-                    class_names,
-                    names_for_library,
-                ),
-                "test": self._serialize_split_statistics(
-                    statistics.test,
-                    class_names,
-                    names_for_library,
-                ),
+                    labeled_counts[name],
+                    status_counts[name],
+                )
+                for name in SPLITS
             }
+            all_status_counts: Counter[str] = Counter()
+            for counts in status_counts.values():
+                all_status_counts.update(counts)
 
             return {
                 "dataset_id": dataset_id,
                 "task": task.value,
                 "grid_size": grid_size,
                 "image_count": image_counts["all"],
+                "labeled_count": labeled_counts.total(),
+                "status_counts": dict(all_status_counts),
                 "images_by_split": image_counts,
                 "annotation_count": label_counts["all"],
                 "annotations_per_class": class_statistics,
@@ -123,7 +129,9 @@ class DatasetStatisticsService:
     @staticmethod
     def _serialize_split_statistics(split_statistics: Any,
                                     class_names: list[str],
-                                    names_for_library: list[str]) -> dict | None:
+                                    names_for_library: list[str],
+                                    labeled_count: int,
+                                    status_counts: Counter[str]) -> dict | None:
         if split_statistics is None:
             return None
 
@@ -141,6 +149,8 @@ class DatasetStatisticsService:
 
         return {
             "image_count": split_statistics.count,
+            "labeled_count": labeled_count,
+            "status_counts": dict(status_counts),
             "annotation_count": label_counts["all"],
             "annotations_per_class": [
                 {key: value for key, value in item.items() if key != "heatmap"}
@@ -158,9 +168,11 @@ class DatasetStatisticsService:
                                task: TaskType,
                                names: list[str],
                                category: type,
-                               class_count: int) -> dict[DataSplit, list[Sample]]:
+                               class_count: int,
+                               labeled_counts: Counter[str],
+                               status_counts: dict[str, Counter[str]]) -> dict[DataSplit, list[Sample]]:
         directories: dict[str, tuple[Path, Path]] = {}
-        for split_name in ("train", "val", "test"):
+        for split_name in SPLITS:
             images_dir = root / split_name / "images"
             labels_dir = root / split_name / "labels"
             images_dir.mkdir(parents=True)
@@ -176,13 +188,11 @@ class DatasetStatisticsService:
 
         for row in self.samples.iter_statistics_rows(dataset_id):
             split_name = "val" if row.split == "valid" else row.split
-            split = {
-                "train": DataSplit.TRAIN,
-                "val": DataSplit.VAL,
-                "test": DataSplit.TEST,
-            }.get(split_name)
+            split = SPLITS.get(split_name)
             if split is None:
                 raise ValueError(f"Неизвестный сплит датасета: {row.split}")
+            labeled_counts[split_name] += int(row.is_labeled)
+            status_counts[split_name][row.status] += 1
 
             geometries = json.loads(row.geometry_json) if row.geometry_json else []
             if not isinstance(geometries, list):
