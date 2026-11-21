@@ -18,7 +18,7 @@ from apps.api.app.api import (
     classes,
     consent,
     privacy_policy,
-    comments,
+    comments
 )
 
 
