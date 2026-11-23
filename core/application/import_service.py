@@ -22,6 +22,24 @@ logger = logging.getLogger(__name__)
 
 
 _YAML_NAMES = ("data.yaml", "dataset.yaml", "config.yaml", "data.yml", "dataset.yml")
+_TASK_LABELS = {TaskType.DETECT: "Detect", TaskType.OBB: "OBB", TaskType.SEGMENT: "Polygon"}
+
+
+class ImportConfirmationRequired(ValueError):
+    def __init__(self, message: str, total_samples: int, parse_errors: int):
+        super().__init__(message)
+        self.total_samples = total_samples
+        self.parse_errors = parse_errors
+
+
+def read_import_label(path: Path, class_names: list[str], task: TaskType):
+    try:
+        return parse_label_file(path, class_names, task, is_strict=True), None
+    except Exception as exc:
+        message = next(iter(str(exc).splitlines()), "Ошибка разбора разметки")[:200]
+        if "/" in message or "\\" in message:
+            message = "Ошибка разбора разметки"
+        return [], message
 
 
 def resolve_dataset_root(root: Path) -> Path:
@@ -30,6 +48,9 @@ def resolve_dataset_root(root: Path) -> Path:
         found = list(root.rglob(yaml_name))
         if found:
             return found[0].parent
+
+    if root.name in {"train", "valid", "val", "test"} and (root / "images").is_dir():
+        return root.parent
 
     for split_dir in ("train", "valid", "val", "images"):
         found_splits = [p for p in root.rglob(split_dir) if p.is_dir()]
@@ -114,7 +135,7 @@ def build_acmenra_dataset(root: Path,
 
     task_str = raw_cfg.get("task")
     try:
-        resolved_task = TaskType(task_str) if task_str else task
+        resolved_task = TaskType(task_str.strip().lower()) if isinstance(task_str, str) and task_str else task
     except ValueError:
         resolved_task = task
 
@@ -184,7 +205,11 @@ class ImportService:
                    dataset_id: int,
                    task: TaskType,
                    zip_source: bytes | Path,
+                   *,
+                   storage_prefix: str,
                    existing_classes: List[str] | None = None,
+                   append: bool = False,
+                   allow_unlabeled: bool = False,
                    progress_callback: Callable[..., None] | None = None) -> dict:
         imported_count = 0
         errors_count = 0
@@ -211,6 +236,8 @@ class ImportService:
 
             report("discovering", 18)
 
+            if append:
+                existing_classes = self.classes.get_names(dataset_id)
             config = build_acmenra_dataset(
                 root=root,
                 task=task,
@@ -218,35 +245,64 @@ class ImportService:
             )
             class_names = config.names or existing_classes or []
 
-            if class_names and self.classes is not None:
-                self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
-
             split_samples = [
                 (split_enum, split_enum.value.lower(), load_split_samples(config, split_enum))
                 for split_enum in (DataSplit.TRAIN, DataSplit.VAL, DataSplit.TEST)
             ]
             total_samples = sum(len(samples) for _, _, samples in split_samples)
+            label_errors: dict[Path, str] = {}
+            class_ids: dict[int, int] = {}
+            if append:
+                split_samples = self._skip_existing_samples(dataset_id, split_samples)
+                mismatch = config.task != task
+                if mismatch:
+                    source = _TASK_LABELS.get(config.task, config.task.value)
+                    target = _TASK_LABELS.get(task, task.value)
+                    warning = f"В архиве разметка {source}, а датасет ожидает {target}."
+                for _, _, samples in split_samples:
+                    for sample in samples:
+                        path = sample.label_path
+                        if path is None:
+                            continue
+                        if mismatch:
+                            error = warning if path.read_bytes().strip() else None
+                        else:
+                            _, error = read_import_label(path, class_names, task)
+                        if error is not None:
+                            label_errors[path] = error
+                if (mismatch or label_errors) and not allow_unlabeled:
+                    if not mismatch:
+                        warning = "Часть разметки в архиве не удалось прочитать."
+                    raise ImportConfirmationRequired(warning, total_samples, len(label_errors))
+                if not mismatch and any(samples for _, _, samples in split_samples):
+                    class_ids = self._append_class_ids(dataset_id, class_names)
+            elif class_names and self.classes is not None:
+                self.classes.ensure_classes(dataset_id=dataset_id, names=class_names)
+
+            importable_count = sum(len(samples) for _, _, samples in split_samples)
             report("importing", 20)
-            progress_interval = max(1, (total_samples + 99) // 100)
+            progress_interval = max(1, (importable_count + 99) // 100)
 
             for _, split_name, samples in split_samples:
                 for idx, sample in enumerate(samples):
                     parse_error: str | None = None
                     instances = []
-
-                    if getattr(sample, "label_path", None) is not None and sample.label_path.exists():
-                        try:
-                            instances = parse_label_file(
-                                path=sample.label_path,
-                                class_names=class_names,
-                                task=task,
-                                is_strict=True,
-                            )
-                        except Exception as exc:
-                            parse_error = str(exc).splitlines()[0][:200]
-                            if "/" in parse_error or "\\" in parse_error:
-                                parse_error = "Ошибка разбора разметки"
+                    raw_txt = b""
+                    if sample.label_path is not None:
+                        parse_error = label_errors.get(sample.label_path)
+                        if parse_error is None:
+                            raw_txt = sample.label_path.read_bytes()
+                            if not append or class_ids:
+                                instances, parse_error = read_import_label(sample.label_path, class_names, task)
+                        if parse_error is not None:
                             errors_count += 1
+                            if append:
+                                raw_txt = b""
+                        elif class_ids and any(item.class_id != class_ids[item.class_id] for item in instances):
+                            lines = [line.split(maxsplit=1) for line in raw_txt.decode("utf-8").splitlines() if line.strip()]
+                            raw_txt = "".join(f"{class_ids[int(class_id)]} {coords}\n" for class_id, coords in lines).encode("utf-8")
+                            for item in instances:
+                                item.class_id = class_ids[item.class_id]
 
                     img_bytes, img_filename, content_type = normalize_image_file(sample.image_path)
 
@@ -260,18 +316,13 @@ class ImportService:
                     )
                     norm_img_path.unlink(missing_ok=True)
 
-                    s3_img_key = image_key(dataset_id, split_name, img_filename)
-                    s3_lbl_key = label_key(dataset_id, split_name, sample.stem)
-                    s3_thb_key = thumb_key(dataset_id, split_name, sample.stem)
+                    s3_img_key = image_key(storage_prefix, split_name, img_filename)
+                    s3_lbl_key = label_key(storage_prefix, split_name, sample.stem)
+                    s3_thb_key = thumb_key(storage_prefix, split_name, sample.stem)
 
                     self.s3.put_bytes(s3_img_key, img_bytes, content_type=content_type)
                     self.s3.put_bytes(s3_thb_key, thumb_bytes, content_type="image/jpeg")
 
-                    raw_txt = (
-                        sample.label_path.read_bytes()
-                        if (getattr(sample, "label_path", None) and sample.label_path.exists())
-                        else b""
-                    )
                     self.s3.put_bytes(s3_lbl_key, raw_txt, content_type="text/plain")
 
                     if self.samples is not None:
@@ -311,11 +362,11 @@ class ImportService:
                     processed_count += 1
                     if (
                             processed_count % progress_interval == 0
-                            or processed_count == total_samples
+                            or processed_count == importable_count
                     ):
                         report(
                             "importing",
-                            20 + int(processed_count * 75 / max(1, total_samples)),
+                            20 + int(processed_count * 75 / max(1, importable_count)),
                         )
 
             report("finalizing", 98)
@@ -327,3 +378,32 @@ class ImportService:
             "classes": class_names,
             "local_gallery_ready": False,
         }
+
+    def _skip_existing_samples(
+        self, dataset_id: int, split_samples: list[tuple[DataSplit, str, list[Sample]]],
+    ) -> list[tuple[DataSplit, str, list[Sample]]]:
+        result = []
+        for split, name, samples in split_samples:
+            if not samples:
+                continue
+            existing = {sample.stem.casefold() for sample in self.samples.list_for_split(dataset_id, name)}
+            if name == "val":
+                existing.update(sample.stem.casefold() for sample in self.samples.list_for_split(dataset_id, "valid"))
+            new_samples = []
+            for sample in samples:
+                stem = sample.stem.casefold()
+                if stem not in existing:
+                    new_samples.append(sample)
+                    existing.add(stem)
+            result.append((split, name, new_samples))
+        return result
+
+    def _append_class_ids(self, dataset_id: int, class_names: list[str]) -> dict[int, int]:
+        target_ids = {row.name.casefold(): row.class_index for row in self.classes.list_for_dataset(dataset_id)}
+        mapped = {}
+        for source_id, name in enumerate(class_names):
+            key = name.strip().casefold()
+            if key not in target_ids:
+                target_ids[key] = self.classes.add_class(dataset_id, name)
+            mapped[source_id] = target_ids[key]
+        return mapped

@@ -31,9 +31,9 @@ from apps.api.app.schemas.dataset import CreateDatasetRequest
 from apps.api.app.schemas.dataset_statistics import DatasetStatisticsDTO
 
 from core.application.dataset_service import DatasetService
-from core.application.dataset_statistics_service import DatasetStatisticsService
+from core.application.dataset_statistics_service import DatasetStatisticsService, DatasetStatisticsUnavailable
 from core.infrastructure.s3.client import S3Client
-from core.infrastructure.s3.keys import clean_filename, clean_split
+from core.infrastructure.s3.keys import clean_filename, clean_split, dataset_storage_prefixes
 
 
 logger = logging.getLogger(__name__)
@@ -112,11 +112,15 @@ def get_dataset_statistics(dataset_id: DatasetId,
                            service: DatasetStatisticsService = Depends(
                                get_dataset_statistics_service
                            )) -> DatasetStatisticsDTO:
-    result = service.get_statistics(
-        dataset_id=dataset_id,
-        task=TaskType(dataset.task),
-        grid_size=grid_size,
-    )
+    try:
+        result = service.get_statistics(
+            dataset_id=dataset_id,
+            task=TaskType(dataset.task),
+            grid_size=grid_size,
+            public_id=dataset.public_id,
+        )
+    except DatasetStatisticsUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     return {**result, "dataset_id": dataset.public_id}
 
@@ -128,13 +132,14 @@ def delete_dataset(dataset_id: DatasetId,
                    service: DatasetService = Depends(get_dataset_service),
                    s3: S3Client = Depends(get_s3_client)) -> None:
     """Удаляет датасет владельца, его файлы и связанные записи."""
-    s3.delete_prefix(f"datasets/{dataset_id}/")
+    def delete_storage() -> None:
+        for prefix in dataset_storage_prefixes(dataset):
+            s3.delete_prefix(prefix)
+        legacy_storage = STORAGE_DIR / f"dataset_{dataset_id}"
+        if legacy_storage.exists():
+            shutil.rmtree(legacy_storage)
 
-    legacy_storage = STORAGE_DIR / f"dataset_{dataset_id}"
-    if legacy_storage.exists():
-        shutil.rmtree(legacy_storage)
-
-    service.delete_dataset(dataset_id=dataset_id)
+    service.delete_dataset(dataset_id=dataset_id, before_commit=delete_storage)
 
 
 @router.delete("/{dataset_id}/gallery-item", status_code=status.HTTP_204_NO_CONTENT)
@@ -245,7 +250,8 @@ def get_import_status(import_id: int,
         processed_samples=record.processed_samples,
         imported_samples=record.imported_samples,
         parse_errors=record.parse_errors,
-        error=record.error,
+        warning=record.error if record.status == "confirmation_required" else None,
+        error=None if record.status == "confirmation_required" else record.error,
         created_at=record.created_at,
     )
 
@@ -273,7 +279,7 @@ def get_dataset_gallery(dataset_id: DatasetId,
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
 
-    total, rows = sample_repo.paginate_gallery(
+    total, rows, _ = sample_repo.paginate_gallery(
         dataset_id=dataset_id,
         split=split_arg,
         status=None,

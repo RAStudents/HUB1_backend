@@ -22,6 +22,7 @@ from apps.api.app.deps import (
 from apps.api.app.schemas.export import ExportClassDTO, ExportRequestDTO, ExportStatusDTO
 from core.application.export_service import ExportService
 from core.infrastructure.s3.client import S3Client
+from core.infrastructure.s3.keys import dataset_storage_prefix, dataset_storage_prefixes, export_zip_key
 from apps.api.app.deps import require_dataset_role
 
 
@@ -99,6 +100,7 @@ def start_export(dataset_id: DatasetId,
         dataset_id=dataset_id,
         user_id=user.id,
         task=TaskType(dataset.task),
+        storage_prefix=dataset_storage_prefix(dataset),
         export_id=export_record.id,
         accepted_samples=accepted_samples,
         selected_class_ids=class_ids,
@@ -197,7 +199,7 @@ def download_export(dataset_id: DatasetId,
     if record is None or record.status != "completed" or not record.s3_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
 
-    if not str(record.s3_key).startswith(f"datasets/{int(dataset_id)}/exports/"):
+    if record.s3_key not in {export_zip_key(prefix, export_id) for prefix in dataset_storage_prefixes(dataset)}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив экспорта не найден")
     if s3.is_remote:
         try:

@@ -235,10 +235,12 @@ def get_dataset_service(dataset_repo=Depends(get_dataset_repo),
 
 def get_dataset_statistics_service(sample_repo=Depends(get_sample_repo),
                                    class_repo=Depends(get_class_repo),
+                                   dataset_repo=Depends(get_dataset_repo),
                                    s3: S3Client = Depends(get_s3_client)) -> DatasetStatisticsService:
     return DatasetStatisticsService(
         sample_repo=sample_repo,
         class_repo=class_repo,
+        dataset_repo=dataset_repo,
         s3_client=s3,
     )
 

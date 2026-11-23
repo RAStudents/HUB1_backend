@@ -10,10 +10,12 @@ from apps.api.app.deps import get_s3_client
 from apps.api.app.errors import client_error
 
 from core.application.dataset_service import DatasetService
-from core.application.import_service import ImportService, resolve_dataset_root
+from core.application.dataset_statistics_service import DatasetStatisticsService
+from core.application.import_service import ImportConfirmationRequired, ImportService, resolve_dataset_root
 from core.application.visualizer import load_acmenra_dataset
 
 from core.infrastructure.media.scratch import extract_zip_safely, scratch_dir
+from core.infrastructure.s3.keys import dataset_storage_prefix, dataset_storage_prefixes
 from core.infrastructure.sql.base import SessionLocal
 from core.infrastructure.sql.repos.annotations import AnnotationRepository
 from core.infrastructure.sql.repos.classes import ClassRepository
@@ -42,13 +44,30 @@ def _make_import_service(db) -> ImportService:
     )
 
 
+def _prepare_statistics(dataset_id: int, task: TaskType) -> None:
+    try:
+        with SessionLocal() as db:
+            DatasetStatisticsService(
+                sample_repo=SampleRepository(db),
+                class_repo=ClassRepository(db),
+                dataset_repo=DatasetRepository(db),
+                s3_client=get_s3_client(),
+            ).get_statistics(dataset_id, task)
+    except Exception:
+        logger.exception("Could not prepare statistics after importing dataset %s", dataset_id)
+
+
 def run_existing_dataset_import(import_id: int,
                                 zip_path: str,
                                 dataset_id: int,
-                                task: str) -> None:
+                                task: str,
+                                allow_unlabeled: bool = False) -> None:
     try:
         with SessionLocal() as db:
             import_repo = ImportJobRepository(db)
+            dataset = DatasetRepository(db).get_by_id(dataset_id)
+            if dataset is None:
+                raise LookupError("Датасет не найден")
             import_repo.update_progress(
                 import_id,
                 stage="processing",
@@ -62,8 +81,12 @@ def run_existing_dataset_import(import_id: int,
                 dataset_id=dataset_id,
                 task=TaskType(task),
                 zip_source=Path(zip_path),
+                storage_prefix=dataset_storage_prefix(dataset),
+                append=True,
+                allow_unlabeled=allow_unlabeled,
                 progress_callback=_update_progress(import_repo, import_id, dataset_id),
             )
+            _prepare_statistics(dataset_id, TaskType(task))
             import_repo.update_progress(
                 import_id,
                 dataset_id=dataset_id,
@@ -75,6 +98,9 @@ def run_existing_dataset_import(import_id: int,
                 imported_samples=result["imported_samples"],
                 parse_errors=result["parse_errors"],
             )
+    except ImportConfirmationRequired as exc:
+        with SessionLocal() as db:
+            ImportJobRepository(db).require_confirmation(import_id, str(exc), exc.total_samples, exc.parse_errors)
     except Exception as exc:
         logger.exception("Import job %s failed for dataset %s", import_id, dataset_id)
         with SessionLocal() as db:
@@ -137,9 +163,11 @@ def run_new_dataset_import(import_id: int,
                 dataset_id=dataset_id,
                 task=dataset.task,
                 zip_source=Path(zip_path),
+                storage_prefix=dataset_storage_prefix(dataset_repo.get_by_id(dataset_id)),
                 existing_classes=dataset.names,
                 progress_callback=_update_progress(import_repo, import_id, dataset_id),
             )
+            _prepare_statistics(dataset_id, dataset.task)
 
             import_repo.update_progress(
                 import_id,
@@ -156,12 +184,18 @@ def run_new_dataset_import(import_id: int,
         logger.exception("Import job %s failed while creating a dataset", import_id)
         if dataset_id is not None:
             try:
-                get_s3_client().delete_prefix(f"datasets/{dataset_id}/")
-                storage_path = Path("storage") / f"dataset_{dataset_id}"
-                if storage_path.exists():
-                    shutil.rmtree(storage_path, ignore_errors=True)
                 with SessionLocal() as db:
-                    DatasetRepository(db).delete(dataset_id)
+                    dataset_repo = DatasetRepository(db)
+                    record = dataset_repo.get_by_id(dataset_id)
+                    if record is not None:
+                        def delete_storage() -> None:
+                            for prefix in dataset_storage_prefixes(record):
+                                get_s3_client().delete_prefix(prefix)
+                            storage_path = Path("storage") / f"dataset_{dataset_id}"
+                            if storage_path.exists():
+                                shutil.rmtree(storage_path, ignore_errors=True)
+
+                        dataset_repo.delete(dataset_id, before_commit=delete_storage)
             except Exception:
                 logger.exception("Failed to clean up dataset %s after import failure", dataset_id)
         with SessionLocal() as db:

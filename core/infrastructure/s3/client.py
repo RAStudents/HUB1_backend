@@ -132,7 +132,7 @@ class S3Client:
                 else self._client
             )
         else:
-            self.storage_dir.mkdir(parents=True, exist_ok=True)
+            self._local_storage_root().mkdir(parents=True, exist_ok=True)
             self._presign_client = None
 
     @property
@@ -153,7 +153,17 @@ class S3Client:
         if self.is_remote:
             self._client.head_bucket(Bucket=self.bucket)
         else:
-            self.storage_dir.mkdir(parents=True, exist_ok=True)
+            self._local_storage_root().mkdir(parents=True, exist_ok=True)
+
+    def _local_storage_root(self) -> Path:
+        root = self.storage_dir.resolve()
+        if os.name == "nt":
+            absolute = str(root)
+            if not absolute.startswith("\\\\?\\"):
+                if absolute.startswith("\\\\"):
+                    return Path("\\\\?\\UNC\\" + absolute[2:])
+                return Path("\\\\?\\" + absolute)
+        return root
 
     def safe_path(self,
                   key: str) -> Path:
@@ -163,7 +173,7 @@ class S3Client:
         relative = Path(key)
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("Invalid storage key")
-        root = self.storage_dir.resolve()
+        root = self._local_storage_root()
         target = (root / relative).resolve()
         if not target.is_relative_to(root):
             raise ValueError("Invalid storage key")
@@ -240,7 +250,7 @@ class S3Client:
                     self.delete_many(keys)
             return
         target = self.safe_path(prefix)
-        root = self.storage_dir.resolve()
+        root = self._local_storage_root()
         if target == root:
             raise ValueError("Invalid storage prefix")
         if target.is_dir():

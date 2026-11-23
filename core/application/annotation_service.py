@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+from core.infrastructure.s3.keys import image_key, label_key, legacy_dataset_prefix, thumb_key
 from core.infrastructure.cv.labels import parse_label_file, write_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 
@@ -55,7 +55,7 @@ class AnnotationService:
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
         s3_lbl_key = getattr(sample, "label_key", None) or label_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
 
         raw_txt = self.s3.get_bytes(s3_lbl_key)
@@ -133,7 +133,7 @@ class AnnotationService:
 
         # Скачиваем оригинал из S3 и перерисовываем превью
         s3_img_key = getattr(sample, "image_key", None) or image_key(
-            dataset_id, sample.split, f"{sample.stem}.jpg"
+            legacy_dataset_prefix(dataset_id), sample.split, f"{sample.stem}.jpg"
         )
         img_bytes = self.s3.get_bytes(s3_img_key)
         if not img_bytes:
@@ -149,10 +149,10 @@ class AnnotationService:
 
         # Загружаем обновлённый .txt и превью в S3
         s3_lbl_key = getattr(sample, "label_key", None) or label_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
         s3_thb_key = getattr(sample, "thumb_key", None) or thumb_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
         self.s3.put_bytes(s3_lbl_key, new_txt_bytes, content_type="text/plain")
         self.s3.put_bytes(s3_thb_key, new_thumb_bytes, content_type="image/jpeg")
