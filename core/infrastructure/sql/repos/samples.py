@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import json
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 
 from core.infrastructure.sql.schema import (
     annotations_table,
@@ -301,7 +301,8 @@ class SampleRepository:
                          class_ids: list[int],
                          offset: int,
                          limit: int,
-                         stems: list[str] | None = None) -> tuple[int, list]:
+                         stems: list[str] | None = None,
+                         anchor_sample_id: int | None = None) -> tuple[int, list, int]:
         annotation_counts = (
             select(
                 annotations_table.c.sample_id,
@@ -331,9 +332,17 @@ class SampleRepository:
                 .replace("_", "\\_")
             )
             search_term = f"%{escaped}%"
+            image_key = samples_table.c.image_key
+            marker = "/images/"
+            marker_position = (
+                func.strpos(image_key, marker)
+                if self.db.get_bind().dialect.name == "postgresql"
+                else func.instr(image_key, marker)
+            )
             filters.append(or_(
                 samples_table.c.stem.ilike(search_term, escape="\\"),
-                samples_table.c.image_key.ilike(search_term, escape="\\"),
+                and_(marker_position > 0,
+                     func.substr(image_key, marker_position + len(marker)).ilike(search_term, escape="\\")),
             ))
         if stems:
             filters.append(samples_table.c.stem.in_(stems))
@@ -362,14 +371,24 @@ class SampleRepository:
             filters.append(object_count_expression > 1)
 
         where_clause = and_(*filters)
-        total = self.db.execute(
+        count_query = (
             select(func.count(samples_table.c.id))
             .select_from(samples_table.outerjoin(
                 annotation_counts,
                 samples_table.c.id == annotation_counts.c.sample_id,
             ))
             .where(where_clause)
-        ).scalar_one()
+        )
+        if anchor_sample_id is None:
+            total = self.db.execute(count_query).scalar_one()
+        else:
+            total, preceding, present = self.db.execute(count_query.add_columns(
+                func.count().filter(samples_table.c.id < anchor_sample_id),
+                func.count().filter(samples_table.c.id == anchor_sample_id),
+            )).one()
+            if not present:
+                raise LookupError("Кадр не найден.")
+            offset = (preceding // limit) * limit
 
         query = (
             select(
@@ -388,7 +407,7 @@ class SampleRepository:
             .limit(limit)
         )
         rows = self.db.execute(query).fetchall()
-        return total, rows
+        return total, rows, offset
 
     def get_gallery_stats(self,
                           dataset_id: int,
@@ -431,30 +450,23 @@ class SampleRepository:
                        sample_id: int,
                        geometries: list[dict],
                        commit: bool = True) -> None:
-        geometry_json = json.dumps(geometries)
-        exists = self.db.execute(
-            select(sample_geometries_table.c.sample_id).where(
-                sample_geometries_table.c.sample_id == sample_id
-            )
-        ).first()
-        if exists:
-            self.db.execute(
-                sample_geometries_table.update()
-                .where(sample_geometries_table.c.sample_id == sample_id)
-                .values(geometry_json=geometry_json)
-            )
-        else:
-            self.db.execute(
-                sample_geometries_table.insert().values(
-                    sample_id=sample_id,
-                    geometry_json=geometry_json,
-                )
-            )
+        self.db.execute(text("""
+            INSERT INTO sample_geometries (sample_id, geometry_json)
+            VALUES (:sample_id, :geometry_json)
+            ON CONFLICT (sample_id) DO UPDATE SET geometry_json = excluded.geometry_json
+        """), {"sample_id": sample_id, "geometry_json": json.dumps(geometries)})
         if commit:
             self.db.commit()
 
     def commit(self) -> None:
         self.db.commit()
+
+    def set_missing_geometries(self, sample_id: int, geometries: list[dict]) -> None:
+        self.db.execute(text("""
+            INSERT INTO sample_geometries (sample_id, geometry_json)
+            SELECT id, :geometry_json FROM samples WHERE id = :sample_id
+            ON CONFLICT (sample_id) DO NOTHING
+        """), {"sample_id": sample_id, "geometry_json": json.dumps(geometries)})
 
     def get_geometries(self,
                        geometry_json: str | None) -> list[dict]:
@@ -492,7 +504,8 @@ class SampleRepository:
             select(
                 samples_table.c.id,
                 samples_table.c.split,
-                samples_table.c.label_key,
+                samples_table.c.is_labeled,
+                samples_table.c.status,
                 sample_geometries_table.c.geometry_json,
             )
             .select_from(

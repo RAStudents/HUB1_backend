@@ -3,9 +3,9 @@
 import logging
 from uuid import uuid4
 from sqlalchemy import (
-    Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+    BigInteger, Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 )
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, true
 
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ users_table = Table(
     "users",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("storage_uuid", String(36), nullable=False, unique=True, default=lambda: str(uuid4())),
     Column("email", String(255), unique=True, nullable=False, index=True),
     Column("password_hash", String(255), nullable=False),
     Column("name", String(255), nullable=False),
@@ -31,6 +32,8 @@ datasets_table = Table(
     Column("public_id", String(36), nullable=False, unique=True, default=lambda: str(uuid4())),
     Column("name", String(255), nullable=False),
     Column("task", String(50), nullable=False),  # detect / obb / segment
+    Column("statistics_revision", BigInteger, server_default="0", nullable=False),
+    Column("legacy_storage", Boolean, nullable=False, default=False, server_default=true()),
     Column("owner_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("description", Text, nullable=True),
     Column("is_private", Boolean, default=True, nullable=False),

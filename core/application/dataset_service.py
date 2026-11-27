@@ -1,6 +1,7 @@
 # core/application/dataset_service.py
 
 import logging
+from collections.abc import Callable
 from typing import Any, List
 
 from core.config import LOCAL_API_BASE_URL
@@ -78,5 +79,7 @@ class DatasetService:
         return catalog
 
     def delete_dataset(self,
-                       dataset_id: int) -> None:
-        self.datasets.delete(dataset_id=dataset_id)
+                       dataset_id: int,
+                       *,
+                       before_commit: Callable[[], None] | None = None) -> None:
+        self.datasets.delete(dataset_id=dataset_id, before_commit=before_commit)

@@ -41,7 +41,10 @@ from core.infrastructure.cv.mapper import instances_to_dtos
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
 from core.infrastructure.media.convert import normalize_image_file
-from core.infrastructure.s3.keys import clean_filename, clean_split, image_key, incoming_key, label_key, thumb_key
+from core.infrastructure.s3.keys import (
+    clean_filename, clean_split, dataset_storage_prefix, dataset_storage_prefixes,
+    image_key, incoming_key, label_key, thumb_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +67,7 @@ def list_gallery_samples(request: Request,
                          class_ids: list[int] | None = Query(None),
                          page: int = Query(1, ge=1),
                          page_size: int = Query(24, ge=1, le=100),
+                         anchor_sample_id: int | None = Query(None, ge=1),
                          user: CurrentUser = Depends(
                              require_dataset_role({"owner", "labeler", "observer"})
                          ),
@@ -77,17 +81,21 @@ def list_gallery_samples(request: Request,
     class_names = class_repo.get_names(dataset_id)
     task = TaskType(dataset.task)
 
-    total, rows = sample_repo.paginate_gallery(
-        dataset_id=dataset_id,
-        split=normalized_split,
-        status=sample_status,
-        labeled=labeled,
-        search=search.strip() if search else None,
-        object_count=object_count,
-        class_ids=class_ids or [],
-        offset=(page - 1) * page_size,
-        limit=page_size,
-    )
+    try:
+        total, rows, offset = sample_repo.paginate_gallery(
+            dataset_id=dataset_id,
+            split=normalized_split,
+            status=sample_status,
+            labeled=labeled,
+            search=search.strip() if search else None,
+            object_count=object_count,
+            class_ids=class_ids or [],
+            offset=(page - 1) * page_size,
+            limit=page_size,
+            anchor_sample_id=anchor_sample_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Кадр не найден.") from exc
 
     items = []
     for row in rows:
@@ -151,7 +159,7 @@ def list_gallery_samples(request: Request,
     ]
     return GalleryPageDTO(
         total=total,
-        page=page,
+        page=offset // page_size + 1,
         page_size=page_size,
         task=dataset.task,
         labeled_count=stats["labeled"],
@@ -238,9 +246,10 @@ def update_sample_split(request: Request,
     if sample_repo.list_by_stem(dataset_id, split_name, row.stem):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="В выбранном split уже есть кадр с таким именем")
 
-    new_image_key = image_key(dataset_id, split_name, Path(row.image_key).name)
-    new_label_key = label_key(dataset_id, split_name, row.stem)
-    new_thumb_key = thumb_key(dataset_id, split_name, row.stem)
+    prefix = dataset_storage_prefix(dataset)
+    new_image_key = image_key(prefix, split_name, Path(row.image_key).name)
+    new_label_key = label_key(prefix, split_name, row.stem)
+    new_thumb_key = thumb_key(prefix, split_name, row.stem)
     old_keys = [row.image_key, row.label_key, row.thumb_key]
     new_keys = [new_image_key, new_label_key, new_thumb_key]
     content = [s3.get_bytes(key) for key in old_keys]
@@ -269,6 +278,7 @@ def update_sample_split(request: Request,
 async def import_dataset_zip(dataset_id: DatasetId,
                              background_tasks: BackgroundTasks,
                              file: UploadFile = File(...),
+                             allow_unlabeled: bool = Form(False),
                              user: CurrentUser = Depends(require_dataset_role({"owner"})),
                              dataset=Depends(get_dataset_or_404),
                              import_job_repo=Depends(get_import_job_repo)) -> ImportJobDTO:
@@ -288,6 +298,7 @@ async def import_dataset_zip(dataset_id: DatasetId,
             zip_path=str(zip_path),
             dataset_id=dataset_id,
             task=dataset.task,
+            allow_unlabeled=allow_unlabeled,
         )
     except Exception:
         Path(zip_path).unlink(missing_ok=True)
@@ -312,10 +323,11 @@ async def import_dataset_zip(dataset_id: DatasetId,
 def get_upload_url(dataset_id: DatasetId,
                    req: UploadUrlRequest,
                    user: CurrentUser = Depends(require_dataset_role({"owner"})),
+                   dataset=Depends(get_dataset_or_404),
                    s3: S3Client = Depends(get_s3_client)) -> UploadUrlResponse:
     """Выдаёт presigned PUT ссылку для прямой загрузки кадра во временный префикс S3."""
     try:
-        raw_key = incoming_key(dataset_id, req.split, req.filename)
+        raw_key = incoming_key(dataset_storage_prefix(dataset), req.split, req.filename)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
     url = s3.get_presigned_upload_url(key=raw_key, content_type=req.content_type)
@@ -381,11 +393,12 @@ async def upload_samples(request: Request,
     created: list[SampleCardDTO] = []
     created_keys: list[str] = []
     created_sample_ids: list[int] = []
+    prefix = dataset_storage_prefix(dataset)
     try:
         for stem, filename, content_type, image_bytes, thumb_bytes in prepared:
-            s3_img_key = image_key(dataset_id, split_name, filename)
-            s3_lbl_key = label_key(dataset_id, split_name, stem)
-            s3_thb_key = thumb_key(dataset_id, split_name, stem)
+            s3_img_key = image_key(prefix, split_name, filename)
+            s3_lbl_key = label_key(prefix, split_name, stem)
+            s3_thb_key = thumb_key(prefix, split_name, stem)
             s3.put_bytes(s3_img_key, image_bytes, content_type=content_type)
             created_keys.append(s3_img_key)
             s3.put_bytes(s3_lbl_key, b"", content_type="text/plain")
@@ -438,10 +451,12 @@ def complete_upload(request: Request,
     Завершает загрузку одиночного кадра:
     конвертирует (heic/webp → jpg), создаёт пустой .txt и превью, регистрирует сэмпл в БД.
     """
-    prefix = f"datasets/{int(dataset_id)}/_incoming/"
-    if not isinstance(req.upload_key, str) or not req.upload_key.startswith(prefix):
+    prefixes = dataset_storage_prefixes(dataset)
+    pending_prefixes = (f"{root}/_incoming/" for root in prefixes)
+    pending_prefix = next((root for root in pending_prefixes if req.upload_key.startswith(root)), None)
+    if pending_prefix is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный ключ загрузки")
-    rest = req.upload_key[len(prefix):]
+    rest = req.upload_key[len(pending_prefix):]
     parts = rest.split("/")
     if len(parts) != 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный ключ загрузки")
@@ -471,9 +486,10 @@ def complete_upload(request: Request,
                 task=TaskType(dataset.task),
             )
 
-    s3_img_key = image_key(dataset_id, split_name, norm_filename)
-    s3_lbl_key = label_key(dataset_id, split_name, stem)
-    s3_thb_key = thumb_key(dataset_id, split_name, stem)
+    prefix = prefixes[0]
+    s3_img_key = image_key(prefix, split_name, norm_filename)
+    s3_lbl_key = label_key(prefix, split_name, stem)
+    s3_thb_key = thumb_key(prefix, split_name, stem)
 
     s3.put_bytes(s3_img_key, img_bytes, content_type=content_type)
     s3.put_bytes(s3_lbl_key, b"", content_type="text/plain")

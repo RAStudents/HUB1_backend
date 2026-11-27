@@ -115,11 +115,15 @@ hub/
       yandex.py                      # код Яндекса → тот же user по yandex_id
 
   # ключи в бакете (это prefixes S3):
-  # datasets/{dataset_id}/images/{sample_id}.jpg
-  # datasets/{dataset_id}/labels/{sample_id}.txt
-  # datasets/{dataset_id}/thumbs/{sample_id}.jpg
-  # exports/{export_id}.zip
+  # {owner_storage_uuid}/datasets/{dataset_public_id}/{split}/images/{filename}
+  # {owner_storage_uuid}/datasets/{dataset_public_id}/{split}/labels/{stem}.txt
+  # {owner_storage_uuid}/datasets/{dataset_public_id}/{split}/thumbs/{stem}.jpg
+  # {owner_storage_uuid}/datasets/{dataset_public_id}/exports/{export_id}.zip
+  # {owner_storage_uuid}/datasets/{dataset_public_id}/metadata/statistics-grid-{size}.json
 ```
+
+New dataset objects use the UUID prefixes above. Existing sample and export
+records can still reference objects under `datasets/{internal_dataset_id}/`.
 
 ## Local host
 
@@ -226,3 +230,8 @@ HttpOnly-cookie `consent_visitor_id`; согласие не привязано �
 
 Публичный `GET /api/privacy-policy` отдаёт `title`, `subtitle` и текст Политики;
 frontend отображает его на странице `/privacy-policy`.
+
+## Развёртывание на сервере
+
+Инструкция по запуску на Ubuntu VPS с Docker Compose, PostgreSQL и HTTPS:
+[deploy/README.md](deploy/README.md).

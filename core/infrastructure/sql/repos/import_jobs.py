@@ -60,6 +60,15 @@ class ImportJobRepository:
         )
         self.db.commit()
 
+    def require_confirmation(self, import_id: int, warning: str, total_samples: int, parse_errors: int) -> None:
+        self.db.execute(
+            import_jobs_table.update().where(import_jobs_table.c.id == import_id).values(
+                status="confirmation_required", stage="confirmation_required", error=warning,
+                total_samples=total_samples, parse_errors=parse_errors,
+            )
+        )
+        self.db.commit()
+
     def mark_failed(self,
                     import_id: int,
                     error: str) -> None:
