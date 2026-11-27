@@ -1,21 +1,20 @@
 from sqlalchemy import func, select
 
-from core.infrastructure.sql.schema import notifications_table
+from core.infrastructure.sql.schema import notifications_table, datasets_table
 
 
 class NotificationRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def create(
-        self,
-        user_id: int,
-        notification_type: str,
-        title: str,
-        message: str,
-        dataset_id: int | None = None,
-        commit: bool = True,
-    ) -> int:
+    def create(self,
+               user_id: int,
+               notification_type: str,
+               title: str,
+               message: str,
+               dataset_id: int | None = None,
+               commit: bool = True) -> int:
         result = self.db.execute(
             notifications_table.insert().values(
                 user_id=user_id,
@@ -31,14 +30,13 @@ class NotificationRepository:
             self.db.commit()
         return notification_id
 
-    def list_for_user(
-        self,
-        user_id: int,
-        offset: int,
-        limit: int,
-    ) -> tuple[list, int, int]:
+    def list_for_user( self,
+                       user_id: int,
+                       offset: int,
+                       limit: int) -> tuple[list, int, int]:
         rows = self.db.execute(
-            select(notifications_table)
+            select(*[c for c in notifications_table.c if c.name != "dataset_id"], datasets_table.c.public_id.label("dataset_id"))
+            .select_from(notifications_table.outerjoin(datasets_table, notifications_table.c.dataset_id == datasets_table.c.id))
             .where(notifications_table.c.user_id == user_id)
             .order_by(
                 notifications_table.c.created_at.desc(),
@@ -55,7 +53,8 @@ class NotificationRepository:
         unread_count = self.get_unread_count(user_id)
         return [dict(row._mapping) for row in rows], total, unread_count
 
-    def get_unread_count(self, user_id: int) -> int:
+    def get_unread_count(self,
+                         user_id: int) -> int:
         return self.db.execute(
             select(func.count())
             .select_from(notifications_table)
@@ -65,7 +64,9 @@ class NotificationRepository:
             )
         ).scalar_one()
 
-    def mark_read(self, user_id: int, notification_id: int) -> bool:
+    def mark_read(self,
+                  user_id: int,
+                  notification_id: int) -> bool:
         result = self.db.execute(
             notifications_table.update()
             .where(
@@ -77,7 +78,8 @@ class NotificationRepository:
         self.db.commit()
         return result.rowcount > 0
 
-    def mark_all_read(self, user_id: int) -> int:
+    def mark_all_read(self,
+                      user_id: int) -> int:
         result = self.db.execute(
             notifications_table.update()
             .where(
@@ -87,6 +89,24 @@ class NotificationRepository:
             .values(is_read=True)
         )
         self.db.commit()
+        return result.rowcount
+
+    def mark_dataset_invitation_read(self,
+                                    user_id: int,
+                                    dataset_id: int,
+                                    commit: bool = True) -> int:
+        result = self.db.execute(
+            notifications_table.update()
+            .where(
+                notifications_table.c.user_id == user_id,
+                notifications_table.c.dataset_id == dataset_id,
+                notifications_table.c.type == "dataset_invitation",
+                notifications_table.c.is_read.is_(False),
+            )
+            .values(is_read=True)
+        )
+        if commit:
+            self.db.commit()
         return result.rowcount
 
     def commit(self) -> None:

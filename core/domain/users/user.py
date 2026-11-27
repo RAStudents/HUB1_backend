@@ -18,7 +18,8 @@ class User:
         return self._id
 
     @id.setter
-    def id(self, id: int) -> None:
+    def id(self,
+           id: int) -> None:
         if not isinstance(id, int) or isinstance(id, bool):
             raise TypeError(f"'id' must be 'int', but got {type(id).__name__}")
         if id < 0:
@@ -31,7 +32,8 @@ class User:
         return self._name
 
     @name.setter
-    def name(self, name: str) -> None:
+    def name(self,
+             name: str) -> None:
         if not isinstance(name, str):
             raise TypeError(f"Field 'name' should be '<str>', but got {type(name).__name__}")
         if len(name) == 0:

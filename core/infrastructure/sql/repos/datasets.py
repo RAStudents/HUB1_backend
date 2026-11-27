@@ -1,6 +1,8 @@
 # core/infrastructure/sql/repos/datasets.py
 
 import logging
+from collections.abc import Callable
+from contextlib import contextmanager
 from sqlalchemy import select
 
 from core.infrastructure.sql.schema import (
@@ -9,8 +11,11 @@ from core.infrastructure.sql.schema import (
     datasets_table,
     events_table,
     exports_table,
+    import_jobs_table,
     memberships_table,
+    sample_geometries_table,
     samples_table,
+    users_table,
 )
 
 
@@ -48,13 +53,43 @@ class DatasetRepository:
 
     def get_by_id(self,
                   dataset_id: int):
-        query = datasets_table.select().where(datasets_table.c.id == dataset_id)
+        query = select(
+            datasets_table, users_table.c.storage_uuid.label("owner_storage_uuid"),
+        ).join(users_table, users_table.c.id == datasets_table.c.owner_id).where(datasets_table.c.id == dataset_id)
         return self.db.execute(query).fetchone()
 
+    def get_by_public_id(self, public_id: str):
+        return self.db.execute(datasets_table.select().where(datasets_table.c.public_id == public_id)).fetchone()
+
+    def get_statistics_revision(self, dataset_id: int) -> tuple[str, int] | None:
+        row = self.db.execute(select(
+            datasets_table.c.public_id, datasets_table.c.statistics_revision,
+        ).where(datasets_table.c.id == dataset_id)).one_or_none()
+        return (row.public_id, row.statistics_revision) if row is not None else None
+
+    @contextmanager
+    def lock_statistics_revision(self, dataset_id: int, public_id: str, revision: int):
+        # End the read transaction before the conditional write, which also works on SQLite.
+        self.db.rollback()
+        with self.db.begin():
+            result = self.db.execute(datasets_table.update().where(
+                datasets_table.c.id == dataset_id,
+                datasets_table.c.public_id == public_id,
+                datasets_table.c.statistics_revision == revision,
+            ).values(statistics_revision=revision))
+            yield result.rowcount == 1
+
     def delete(self,
-               dataset_id: int) -> None:
+               dataset_id: int,
+               *,
+               before_commit: Callable[[], None] | None = None) -> None:
         sample_ids = select(samples_table.c.id).where(
             samples_table.c.dataset_id == dataset_id
+        )
+        self.db.execute(
+            sample_geometries_table.delete().where(
+                sample_geometries_table.c.sample_id.in_(sample_ids)
+            )
         )
         self.db.execute(
             annotations_table.delete().where(
@@ -76,7 +111,16 @@ class DatasetRepository:
         self.db.execute(
             exports_table.delete().where(exports_table.c.dataset_id == dataset_id)
         )
+        self.db.execute(
+            import_jobs_table.delete().where(import_jobs_table.c.dataset_id == dataset_id)
+        )
         self.db.execute(datasets_table.delete().where(datasets_table.c.id == dataset_id))
+        if before_commit is not None:
+            try:
+                before_commit()
+            except Exception:
+                self.db.rollback()
+                raise
         self.db.commit()
 
     def list_by_ids(self,

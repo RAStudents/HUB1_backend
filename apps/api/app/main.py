@@ -6,7 +6,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 if ENV_FILE.is_file():
@@ -19,6 +18,7 @@ if ENV_FILE.is_file():
 
 from apps.api.app.api.router import api_router
 from apps.api.app.deps import get_s3_client
+from core.infrastructure.s3.client import allowed_bases
 from core.infrastructure.auth.tokens import assert_jwt_configured
 from core.infrastructure.sql.base import init_db
 
@@ -26,28 +26,18 @@ from core.infrastructure.sql.base import init_db
 logger = logging.getLogger(__name__)
 
 
+_PROD = os.getenv("HUB_ENV", "dev").strip().lower() in {"prod", "production"}
+
 app = FastAPI(
     title="HUB Dataset Annotation Platform (MVP)",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None if _PROD else "/docs",
+    redoc_url=None if _PROD else "/redoc",
 )
 
-# Раздача статических файлов (превью и маски)
-STORAGE_DIR = Path("storage")
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-S3_STORAGE = get_s3_client()
-app.mount(
-    f"/storage/{S3_STORAGE.bucket}",
-    StaticFiles(directory=str(S3_STORAGE.storage_dir)),
-    name="s3-storage",
-)
-app.mount("/storage", StaticFiles(directory=str(STORAGE_DIR)), name="storage")
-
-# CORS для фронтенда
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=sorted(allowed_bases()),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,13 +62,16 @@ def startup_event():
         print("[OK] Инициализация БД выполнена.")
     except Exception as exc:
         print(f"[ERROR] Ошибка инициализации БД при старте: {exc}")
+        raise
 
     try:
         s3 = get_s3_client()
         s3.ensure_bucket()
-        print("[OK] S3 (MinIO) подключен, бакет готов.")
+        print(f"[OK] Storage ({'S3' if s3.is_remote else 'local'}) готов.")
     except Exception as exc:
-        print(f"[WARNING] Не удалось подключиться к S3 при старте: {exc}")
+        print(f"[ERROR] Не удалось проверить storage при старте: {exc}")
+        if get_s3_client().is_remote:
+            raise
 
 
 @app.get("/health", tags=["system"])

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import json
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 
 from core.infrastructure.sql.schema import (
     annotations_table,
@@ -17,10 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class SampleRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def count_by_dataset_ids(self, dataset_ids: list[int]) -> dict[int, int]:
+    def count_by_dataset_ids(self,
+                             dataset_ids: list[int]) -> dict[int, int]:
         if not dataset_ids:
             return {}
 
@@ -81,6 +83,28 @@ class SampleRepository:
         self.db.execute(query)
         self.db.commit()
 
+    def update_split_and_keys(self,
+                              dataset_id: int,
+                              sample_id: int,
+                              split: str,
+                              image_key: str,
+                              label_key: str,
+                              thumb_key: str) -> None:
+        self.db.execute(
+            samples_table.update()
+            .where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.id == sample_id,
+            )
+            .values(
+                split=split,
+                image_key=image_key,
+                label_key=label_key,
+                thumb_key=thumb_key,
+            )
+        )
+        self.db.commit()
+
     def lock_sample(self,
                     sample_id: int,
                     user_id: int,
@@ -98,19 +122,20 @@ class SampleRepository:
         self.db.execute(query)
         self.db.commit()
 
-    def acquire_sample_lock(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int,
-        lock_until: datetime,
-        now: datetime,
-    ) -> bool:
+
+    def acquire_sample_lock(self,
+                            dataset_id: int,
+                            sample_id: int,
+                            user_id: int,
+                            lock_until: datetime,
+                            now: datetime,
+                            allowed_statuses: set[str] | None = None) -> bool:
         result = self.db.execute(
             samples_table.update()
             .where(
                 samples_table.c.dataset_id == dataset_id,
                 samples_table.c.id == sample_id,
+                samples_table.c.status.in_(allowed_statuses if allowed_statuses is not None else {"unlabeled", "in_progress", "rejected"}),
                 or_(
                     samples_table.c.lock_user.is_(None),
                     samples_table.c.lock_until.is_(None),
@@ -130,12 +155,24 @@ class SampleRepository:
         self.db.rollback()
         return False
 
-    def release_sample_lock(
-        self,
-        dataset_id: int,
-        sample_id: int,
-        user_id: int | None = None,
-    ) -> bool:
+    def renew_owned_lock(self, dataset_id: int, sample_id: int, user_id: int,
+                         now: datetime, lock_until: datetime) -> bool:
+        result = self.db.execute(
+            samples_table.update().where(
+                samples_table.c.dataset_id == dataset_id,
+                samples_table.c.id == sample_id,
+                samples_table.c.status == "in_progress",
+                samples_table.c.lock_user == user_id,
+                samples_table.c.lock_until > now,
+            ).values(lock_until=lock_until)
+        )
+        self.db.commit()
+        return result.rowcount == 1
+
+    def release_sample_lock(self,
+                            dataset_id: int,
+                            sample_id: int,
+                            user_id: int | None = None) -> bool:
         query = samples_table.update().where(
             samples_table.c.dataset_id == dataset_id,
             samples_table.c.id == sample_id,
@@ -151,6 +188,42 @@ class SampleRepository:
             return True
         self.db.rollback()
         return False
+
+    def unlock_sample(self,
+                      sample_id: int) -> None:
+        query = (
+            samples_table.update()
+            .where(samples_table.c.id == sample_id)
+            .values(lock_user=None, lock_until=None)
+        )
+        self.db.execute(query)
+        self.db.commit()
+
+    def set_status_if(self,
+                      sample_id: int,
+                      expected: str,
+                      status: str) -> bool:
+        result = self.db.execute(
+            samples_table.update()
+            .where(
+                (samples_table.c.id == sample_id)
+                & (samples_table.c.status == expected)
+            )
+            .values(status=status)
+        )
+        self.db.commit()
+        return result.rowcount == 1
+
+    def first_thumb_key(self,
+                        dataset_id: int) -> str | None:
+        row = self.db.execute(
+            select(samples_table.c.thumb_key)
+            .where(samples_table.c.dataset_id == dataset_id)
+            .order_by(samples_table.c.id)
+            .limit(1)
+        ).first()
+        return row.thumb_key if row else None
+
 
     def set_status(self,
                    sample_id: int,
@@ -174,12 +247,10 @@ class SampleRepository:
         )
         return self.db.execute(query).fetchall()
 
-    def list_by_status_and_class_ids(
-        self,
-        dataset_id: int,
-        status: str,
-        class_ids: list[int],
-    ) -> list:
+    def list_by_status_and_class_ids(self,
+                                     dataset_id: int,
+                                     status: str,
+                                     class_ids: list[int]) -> list:
         """Возвращает сэмплы с заданным статусом, содержащие любой из классов."""
         matching_sample_ids = (
             select(annotations_table.c.sample_id)
@@ -220,18 +291,18 @@ class SampleRepository:
         all_rows = self.db.execute(query).fetchall()
         return len(all_rows), all_rows[offset : offset + limit]
 
-    def paginate_gallery(
-        self,
-        dataset_id: int,
-        split: str | None,
-        status: str | None,
-        labeled: bool | None,
-        search: str | None,
-        object_count: str | None,
-        class_ids: list[int],
-        offset: int,
-        limit: int,
-    ) -> tuple[int, list]:
+    def paginate_gallery(self,
+                         dataset_id: int,
+                         split: str | None,
+                         status: str | None,
+                         labeled: bool | None,
+                         search: str | None,
+                         object_count: str | None,
+                         class_ids: list[int],
+                         offset: int,
+                         limit: int,
+                         stems: list[str] | None = None,
+                         anchor_sample_id: int | None = None) -> tuple[int, list, int]:
         annotation_counts = (
             select(
                 annotations_table.c.sample_id,
@@ -255,11 +326,26 @@ class SampleRepository:
         if labeled is not None:
             filters.append(samples_table.c.is_labeled == labeled)
         if search:
-            search_term = f"%{search}%"
+            escaped = (
+                search.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            search_term = f"%{escaped}%"
+            image_key = samples_table.c.image_key
+            marker = "/images/"
+            marker_position = (
+                func.strpos(image_key, marker)
+                if self.db.get_bind().dialect.name == "postgresql"
+                else func.instr(image_key, marker)
+            )
             filters.append(or_(
-                samples_table.c.stem.ilike(search_term),
-                samples_table.c.image_key.ilike(search_term),
+                samples_table.c.stem.ilike(search_term, escape="\\"),
+                and_(marker_position > 0,
+                     func.substr(image_key, marker_position + len(marker)).ilike(search_term, escape="\\")),
             ))
+        if stems:
+            filters.append(samples_table.c.stem.in_(stems))
         if class_ids:
             matching_classes = (
                 select(annotations_table.c.sample_id)
@@ -285,14 +371,24 @@ class SampleRepository:
             filters.append(object_count_expression > 1)
 
         where_clause = and_(*filters)
-        total = self.db.execute(
+        count_query = (
             select(func.count(samples_table.c.id))
             .select_from(samples_table.outerjoin(
                 annotation_counts,
                 samples_table.c.id == annotation_counts.c.sample_id,
             ))
             .where(where_clause)
-        ).scalar_one()
+        )
+        if anchor_sample_id is None:
+            total = self.db.execute(count_query).scalar_one()
+        else:
+            total, preceding, present = self.db.execute(count_query.add_columns(
+                func.count().filter(samples_table.c.id < anchor_sample_id),
+                func.count().filter(samples_table.c.id == anchor_sample_id),
+            )).one()
+            if not present:
+                raise LookupError("Кадр не найден.")
+            offset = (preceding // limit) * limit
 
         query = (
             select(
@@ -311,9 +407,11 @@ class SampleRepository:
             .limit(limit)
         )
         rows = self.db.execute(query).fetchall()
-        return total, rows
+        return total, rows, offset
 
-    def get_gallery_stats(self, dataset_id: int, split: str | None = None) -> dict:
+    def get_gallery_stats(self,
+                          dataset_id: int,
+                          split: str | None = None) -> dict:
         filters = [samples_table.c.dataset_id == dataset_id]
         if split:
             filters.append(samples_table.c.split == split)
@@ -330,26 +428,8 @@ class SampleRepository:
             "unlabeled": sum(count for is_labeled, count in rows if not is_labeled),
         }
 
-    def iter_statistics_rows(self, dataset_id: int):
-        """Streams sample splits and persisted geometries for dataset statistics."""
-        query = (
-            select(
-                samples_table.c.id,
-                samples_table.c.split,
-                sample_geometries_table.c.geometry_json,
-            )
-            .select_from(
-                samples_table.outerjoin(
-                    sample_geometries_table,
-                    samples_table.c.id == sample_geometries_table.c.sample_id,
-                )
-            )
-            .where(samples_table.c.dataset_id == dataset_id)
-            .order_by(samples_table.c.id)
-        )
-        return self.db.execute(query).yield_per(1000)
-
-    def get_class_counts(self, dataset_id: int) -> dict[int, int]:
+    def get_class_counts(self,
+                         dataset_id: int) -> dict[int, int]:
         rows = self.db.execute(
             select(
                 annotations_table.c.class_id,
@@ -366,41 +446,43 @@ class SampleRepository:
         ).fetchall()
         return {class_id: count for class_id, count in rows}
 
-    def set_geometries(
-        self,
-        sample_id: int,
-        geometries: list[dict],
-        commit: bool = True,
-    ) -> None:
-        geometry_json = json.dumps(geometries)
-        exists = self.db.execute(
-            select(sample_geometries_table.c.sample_id).where(
-                sample_geometries_table.c.sample_id == sample_id
-            )
-        ).first()
-        if exists:
-            self.db.execute(
-                sample_geometries_table.update()
-                .where(sample_geometries_table.c.sample_id == sample_id)
-                .values(geometry_json=geometry_json)
-            )
-        else:
-            self.db.execute(
-                sample_geometries_table.insert().values(
-                    sample_id=sample_id,
-                    geometry_json=geometry_json,
-                )
-            )
+    def set_geometries(self,
+                       sample_id: int,
+                       geometries: list[dict],
+                       commit: bool = True) -> None:
+        self.db.execute(text("""
+            INSERT INTO sample_geometries (sample_id, geometry_json)
+            VALUES (:sample_id, :geometry_json)
+            ON CONFLICT (sample_id) DO UPDATE SET geometry_json = excluded.geometry_json
+        """), {"sample_id": sample_id, "geometry_json": json.dumps(geometries)})
         if commit:
             self.db.commit()
 
     def commit(self) -> None:
         self.db.commit()
 
-    def get_geometries(self, geometry_json: str | None) -> list[dict]:
+    def set_missing_geometries(self, sample_id: int, geometries: list[dict]) -> None:
+        self.db.execute(text("""
+            INSERT INTO sample_geometries (sample_id, geometry_json)
+            SELECT id, :geometry_json FROM samples WHERE id = :sample_id
+            ON CONFLICT (sample_id) DO NOTHING
+        """), {"sample_id": sample_id, "geometry_json": json.dumps(geometries)})
+
+    def get_geometries(self,
+                       geometry_json: str | None) -> list[dict]:
         return json.loads(geometry_json) if geometry_json else []
 
-    def list_missing_geometries(self, dataset_id: int) -> list:
+    def get_geometries_for_sample(self,
+                                  sample_id: int) -> list[dict]:
+        row = self.db.execute(
+            select(sample_geometries_table.c.geometry_json).where(
+                sample_geometries_table.c.sample_id == sample_id
+            )
+        ).first()
+        return self.get_geometries(row.geometry_json if row else None)
+
+    def list_missing_geometries(self,
+                                dataset_id: int) -> list:
         return self.db.execute(
             select(samples_table)
             .select_from(
@@ -416,7 +498,30 @@ class SampleRepository:
             .order_by(samples_table.c.id)
         ).fetchall()
 
-    def list_by_stem(self, dataset_id: int, split: str, stem: str) -> list:
+    def iter_statistics_rows(self,
+                             dataset_id: int) -> list:
+        return self.db.execute(
+            select(
+                samples_table.c.id,
+                samples_table.c.split,
+                samples_table.c.is_labeled,
+                samples_table.c.status,
+                sample_geometries_table.c.geometry_json,
+            )
+            .select_from(
+                samples_table.outerjoin(
+                    sample_geometries_table,
+                    samples_table.c.id == sample_geometries_table.c.sample_id,
+                )
+            )
+            .where(samples_table.c.dataset_id == dataset_id)
+            .order_by(samples_table.c.id)
+        ).fetchall()
+
+    def list_by_stem(self,
+                     dataset_id: int,
+                     split: str,
+                     stem: str) -> list:
         """Возвращает сэмплы с указанным именем файла в сплите датасета."""
         query = samples_table.select().where(
             (samples_table.c.dataset_id == dataset_id)
@@ -435,7 +540,10 @@ class SampleRepository:
         )
         return self.db.execute(query).fetchall()
 
-    def list_by_stems(self, dataset_id: int, split: str, stems: list[str]) -> list:
+    def list_by_stems(self,
+                      dataset_id: int,
+                      split: str,
+                      stems: list[str]) -> list:
         """Возвращает сэмплы выбранного сплита с указанными именами."""
         if not stems:
             return []
@@ -447,7 +555,8 @@ class SampleRepository:
         )
         return self.db.execute(query).fetchall()
 
-    def delete(self, sample_id: int) -> None:
+    def delete(self,
+               sample_id: int) -> None:
         """Удаляет сэмпл из БД."""
         self.db.execute(
             annotations_table.delete().where(annotations_table.c.sample_id == sample_id)

@@ -6,8 +6,8 @@ from pydantic import BaseModel
 
 class ImportJobDTO(BaseModel):
     import_id: int
-    dataset_id: int | None = None
-    status: Literal["queued", "processing", "completed", "failed"]
+    dataset_id: str | None = None
+    status: Literal["queued", "processing", "confirmation_required", "completed", "failed"]
     stage: Literal[
         "queued",
         "processing",
@@ -15,6 +15,7 @@ class ImportJobDTO(BaseModel):
         "normalizing",
         "copying",
         "discovering",
+        "confirmation_required",
         "importing",
         "finalizing",
         "building_gallery",
@@ -26,5 +27,6 @@ class ImportJobDTO(BaseModel):
     processed_samples: int
     imported_samples: int
     parse_errors: int
+    warning: str | None = None
     error: str | None = None
     created_at: datetime | None = None

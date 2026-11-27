@@ -18,10 +18,24 @@ from acmenra_ds import (
 
 from core.infrastructure.media.convert import normalize_image_file
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
-from core.infrastructure.s3.keys import export_zip_key, image_key, label_key
+from core.infrastructure.s3.keys import export_zip_key, image_key, label_key, legacy_dataset_prefix
 
 
 logger = logging.getLogger(__name__)
+
+
+def _public_error(exc: Exception) -> str:
+    text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    if (
+        isinstance(exc, (ValueError, PermissionError, LookupError))
+        and text
+        and len(text) <= 200
+        and "Traceback" not in text
+        and "/" not in text
+        and "\\" not in text
+    ):
+        return text
+    return "Не удалось выполнить операцию"
 
 
 class ExportService:
@@ -41,6 +55,8 @@ class ExportService:
                          dataset_id: int,
                          user_id: int,
                          task: TaskType,
+                         *,
+                         storage_prefix: str,
                          export_id: int | None = None,
                          accepted_samples: list | None = None,
                          selected_class_ids: list[int] | None = None,
@@ -167,10 +183,10 @@ class ExportService:
                     img_dir, lbl_dir = split_dirs[split_name]
 
                     s3_img_key = getattr(sample, "image_key", None) or image_key(
-                        dataset_id, split_name, f"{sample.stem}.jpg"
+                        legacy_dataset_prefix(dataset_id), split_name, f"{sample.stem}.jpg"
                     )
                     s3_lbl_key = getattr(sample, "label_key", None) or label_key(
-                        dataset_id, split_name, sample.stem
+                        legacy_dataset_prefix(dataset_id), split_name, sample.stem
                     )
 
                     img_bytes = self.s3.get_bytes(s3_img_key)
@@ -271,7 +287,7 @@ class ExportService:
                         else:
                             zf.write(file_path, arcname=arcname)
 
-                s3_zip = export_zip_key(dataset_id=dataset_id, export_id=export_id)
+                s3_zip = export_zip_key(storage_prefix, export_id)
                 self.exports.update_stage(export_id=export_id, stage="uploading")
                 self.s3.put_bytes(
                     s3_zip, zip_path.read_bytes(), content_type="application/zip"
@@ -294,7 +310,7 @@ class ExportService:
             }
 
         except Exception as exc:
-            self.exports.mark_failed(export_id=export_id, error=str(exc))
+            self.exports.mark_failed(export_id=export_id, error=_public_error(exc))
             raise
 
     @staticmethod

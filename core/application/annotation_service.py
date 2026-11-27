@@ -4,14 +4,17 @@ import logging
 from pathlib import Path
 from typing import Any, List
 from acmenra_cv import TaskType
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.infrastructure.media.scratch import scratch_file
 from core.infrastructure.cv.thumbs import render_thumbnail_bytes
-from core.infrastructure.s3.keys import image_key, label_key, thumb_key
+from core.infrastructure.s3.keys import image_key, label_key, legacy_dataset_prefix, thumb_key
 from core.infrastructure.cv.labels import parse_label_file, write_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 
+from core.application.lock_service import LockService
+from core.domain.enums import SampleStatusEnum
+from core.domain.status import StatusTransitionValidator
 from apps.api.app.schemas.annotation import AnnotationItemDTO, FrameAnnotationsDTO
 
 
@@ -52,7 +55,7 @@ class AnnotationService:
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
         s3_lbl_key = getattr(sample, "label_key", None) or label_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
 
         raw_txt = self.s3.get_bytes(s3_lbl_key)
@@ -93,6 +96,15 @@ class AnnotationService:
         if role == "labeler" and sample.status != "in_progress":
             raise PermissionError("Разметчик может изменять только кадр в работе")
 
+        current = SampleStatusEnum(sample.status)
+        if current == SampleStatusEnum.IN_REVIEW:
+            raise ValueError("Кадр на проверке, правка недоступна")
+        if current == SampleStatusEnum.ACCEPTED and role != "owner":
+            raise PermissionError("Принятый кадр может вернуть только владелец")
+        target = SampleStatusEnum.IN_PROGRESS
+        if current != target and not StatusTransitionValidator.can_transition(current, target):
+            raise ValueError("Этот кадр сейчас нельзя редактировать")
+
         now = datetime.now(timezone.utc)
         lock_until = sample.lock_until
         if lock_until is not None and lock_until.tzinfo is None:
@@ -100,6 +112,10 @@ class AnnotationService:
         lock_expired = lock_until and lock_until < now
         if sample.lock_user != user_id or lock_expired:
             raise PermissionError("Кадр не заблокирован вами или время блокировки истекло")
+        if not self.samples.renew_owned_lock(
+            dataset_id, sample_id, user_id, now, now + timedelta(minutes=20)
+        ):
+            raise PermissionError("Блокировка или статус кадра изменились")
 
         class_names = self.classes.get_names(dataset_id=dataset_id)
         instances = dtos_to_instances(dtos=items, task=task, class_names=class_names)
@@ -117,7 +133,7 @@ class AnnotationService:
 
         # Скачиваем оригинал из S3 и перерисовываем превью
         s3_img_key = getattr(sample, "image_key", None) or image_key(
-            dataset_id, sample.split, f"{sample.stem}.jpg"
+            legacy_dataset_prefix(dataset_id), sample.split, f"{sample.stem}.jpg"
         )
         img_bytes = self.s3.get_bytes(s3_img_key)
         if not img_bytes:
@@ -133,10 +149,10 @@ class AnnotationService:
 
         # Загружаем обновлённый .txt и превью в S3
         s3_lbl_key = getattr(sample, "label_key", None) or label_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
         s3_thb_key = getattr(sample, "thumb_key", None) or thumb_key(
-            dataset_id, sample.split, sample.stem
+            legacy_dataset_prefix(dataset_id), sample.split, sample.stem
         )
         self.s3.put_bytes(s3_lbl_key, new_txt_bytes, content_type="text/plain")
         self.s3.put_bytes(s3_thb_key, new_thumb_bytes, content_type="image/jpeg")
@@ -161,7 +177,12 @@ class AnnotationService:
             is_labeled=bool(instances),
             parse_error=None,
         )
-        self.samples.set_status(sample_id=sample_id, status="in_progress")
+        if current != target and not self.samples.set_status_if(
+            sample_id=sample_id,
+            expected=current.value,
+            status=target.value,
+        ):
+            raise ValueError("Статус кадра уже изменился")
 
         if self.events is not None:
             self.events.log(
@@ -174,4 +195,6 @@ class AnnotationService:
         return FrameAnnotationsDTO(
             sample_id=sample_id,
             items=instances_to_dtos(instances=instances, task=task),
+            saved=True,
+            saved_at=datetime.now(timezone.utc),
         )

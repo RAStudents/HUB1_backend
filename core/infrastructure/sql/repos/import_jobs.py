@@ -7,10 +7,13 @@ logger = logging.getLogger(__name__)
 
 
 class ImportJobRepository:
-    def __init__(self, db_conn):
+    def __init__(self,
+                 db_conn):
         self.db = db_conn
 
-    def create(self, user_id: int, dataset_id: int | None = None):
+    def create(self,
+               user_id: int,
+               dataset_id: int | None = None):
         result = self.db.execute(
             import_jobs_table.insert().values(
                 user_id=user_id,
@@ -23,23 +26,22 @@ class ImportJobRepository:
         self.db.commit()
         return self.get_by_id(result.inserted_primary_key[0])
 
-    def get_by_id(self, import_id: int):
+    def get_by_id(self,
+                  import_id: int):
         query = import_jobs_table.select().where(import_jobs_table.c.id == import_id)
         return self.db.execute(query).fetchone()
 
-    def update_progress(
-        self,
-        import_id: int,
-        *,
-        stage: str,
-        progress: int,
-        total_samples: int,
-        processed_samples: int,
-        imported_samples: int,
-        parse_errors: int,
-        status: str = "processing",
-        dataset_id: int | None = None,
-    ) -> None:
+    def update_progress(self,
+                        import_id: int,
+                        *,
+                        stage: str,
+                        progress: int,
+                        total_samples: int,
+                        processed_samples: int,
+                        imported_samples: int,
+                        parse_errors: int,
+                        status: str = "processing",
+                        dataset_id: int | None = None) -> None:
         values = {
             "stage": stage,
             "progress": max(0, min(100, progress)),
@@ -58,7 +60,18 @@ class ImportJobRepository:
         )
         self.db.commit()
 
-    def mark_failed(self, import_id: int, error: str) -> None:
+    def require_confirmation(self, import_id: int, warning: str, total_samples: int, parse_errors: int) -> None:
+        self.db.execute(
+            import_jobs_table.update().where(import_jobs_table.c.id == import_id).values(
+                status="confirmation_required", stage="confirmation_required", error=warning,
+                total_samples=total_samples, parse_errors=parse_errors,
+            )
+        )
+        self.db.commit()
+
+    def mark_failed(self,
+                    import_id: int,
+                    error: str) -> None:
         self.db.execute(
             import_jobs_table.update()
             .where(import_jobs_table.c.id == import_id)

@@ -11,13 +11,11 @@ class AnnotationRepository:
     def __init__(self, db_conn):
         self.db = db_conn
 
-    def replace_sample_annotations(
-        self,
-        sample_id: int,
-        class_ids: list[int],
-        user_id: int | None,
-        commit: bool = True,
-    ) -> None:
+    def replace_sample_annotations(self,
+                                   sample_id: int,
+                                   class_ids: list[int],
+                                   user_id: int | None,
+                                   commit: bool = True) -> None:
         """
         Атомарно заменяет аннотации кадра:
         удаляет старые записи и вставляет актуальные из редактора.

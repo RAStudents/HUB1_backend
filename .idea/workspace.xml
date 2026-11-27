@@ -34,10 +34,19 @@
     "Python.status.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "<unknown>",
-    "last_opened_file_path": "/Users/stepanborodin/Documents/Acmenra/Students/Autumn26/HUB1/HUB1_backend"
+    "git-widget-placeholder": "Rustam-coder",
+    "last_opened_file_path": "/Users/stepanborodin/Documents/Acmenra/Students/Autumn26/HUB1/HUB1_backend/core/infrastructure/sql"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/core/infrastructure/sql" />
+      <recent name="$PROJECT_DIR$/core/infrastructure/sql/repos" />
+      <recent name="$PROJECT_DIR$/core/infrastructure/s3" />
+      <recent name="$PROJECT_DIR$/core/infrastructure/media" />
+      <recent name="$PROJECT_DIR$/core/infrastructure/email" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>

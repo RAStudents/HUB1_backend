@@ -22,10 +22,10 @@ def parse_label_file(path: Path,
 
     category = make_category_enum(class_names)
     nc = max(len(class_names), 1)
-    
+
     parser = LabelParser(nc=nc, task_type=task, category=category)
-    
     return parser.parse(path=path, is_strict=is_strict)
+
 
 
 def write_label_file(path: Path,
@@ -44,6 +44,6 @@ def write_label_file(path: Path,
 
     category = make_category_enum(class_names)
     nc = max(len(class_names), 1)
-    
+
     writer = LabelWriter(nc=nc, task_type=task, category=category)
     writer.write(path=path, instances=instances, is_strict=is_strict)

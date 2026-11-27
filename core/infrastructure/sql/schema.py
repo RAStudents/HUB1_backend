@@ -1,10 +1,11 @@
 # core/infrastructure/sql/schema.py
 
 import logging
+from uuid import uuid4
 from sqlalchemy import (
-    Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+    BigInteger, Index, MetaData, Table, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 )
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, true
 
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ users_table = Table(
     "users",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("storage_uuid", String(36), nullable=False, unique=True, default=lambda: str(uuid4())),
     Column("email", String(255), unique=True, nullable=False, index=True),
     Column("password_hash", String(255), nullable=False),
     Column("name", String(255), nullable=False),
@@ -27,8 +29,11 @@ datasets_table = Table(
     "datasets",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("public_id", String(36), nullable=False, unique=True, default=lambda: str(uuid4())),
     Column("name", String(255), nullable=False),
     Column("task", String(50), nullable=False),  # detect / obb / segment
+    Column("statistics_revision", BigInteger, server_default="0", nullable=False),
+    Column("legacy_storage", Boolean, nullable=False, default=False, server_default=true()),
     Column("owner_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("description", Text, nullable=True),
     Column("is_private", Boolean, default=True, nullable=False),
@@ -52,6 +57,7 @@ memberships_table = Table(
     Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("role", String(50), nullable=False),  # owner / labeler / observer
+    Column("status", String(20), server_default="accepted", nullable=False),
     UniqueConstraint("dataset_id", "user_id", name="uq_dataset_user_membership"),
 )
 
@@ -128,6 +134,21 @@ events_table = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
+sample_comments_table = Table(
+    "sample_comments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False),
+    Column("sample_id", Integer, ForeignKey("samples.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("parent_id", Integer, ForeignKey("sample_comments.id", ondelete="CASCADE"), nullable=True),
+    Column("annotation_index", Integer, nullable=True),
+    Column("body", Text, nullable=False),
+    Column("resolved", Boolean, server_default="false", nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index("ix_sample_comments_dataset_sample", sample_comments_table.c.dataset_id, sample_comments_table.c.sample_id, sample_comments_table.c.id)
+
 notifications_table = Table(
     "notifications",
     metadata,
@@ -166,7 +187,7 @@ import_jobs_table = Table(
     "import_jobs",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("dataset_id", Integer, nullable=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=True),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("status", String(50), server_default="queued", nullable=False),
     Column("stage", String(50), server_default="queued", nullable=False),
@@ -200,4 +221,20 @@ revoked_access_tokens_table = Table(
     Column("jti", String(64), primary_key=True),
     Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
+)
+
+visitor_data_consent_events_table = Table(
+    "visitor_data_consent_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("visitor_id", String(36), nullable=False),
+    Column("version", String(32), nullable=False),
+    Column("action", String(16), nullable=False),  # accepted / rejected / withdrawn
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+Index(
+    "ix_visitor_data_consent_events_visitor_version_created",
+    visitor_data_consent_events_table.c.visitor_id,
+    visitor_data_consent_events_table.c.version,
+    visitor_data_consent_events_table.c.created_at,
 )

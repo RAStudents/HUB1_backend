@@ -1,4 +1,8 @@
+# core/application/dataset_statistics_service.py
+
 import json
+import logging
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -8,37 +12,121 @@ from acmenra_ds.data.enums import DataSplit
 from acmenra_ds.statistics import Statistics
 
 from apps.api.app.schemas.annotation import AnnotationItemDTO
+from apps.api.app.schemas.dataset_statistics import DatasetStatisticsDTO
 from core.infrastructure.cv.labels import parse_label_file
 from core.infrastructure.cv.mapper import dtos_to_instances, instances_to_dtos
 from core.infrastructure.media.scratch import scratch_dir, scratch_file
+from core.infrastructure.s3.keys import dataset_statistics_key, dataset_storage_prefixes
+
+
+SPLITS = {"train": DataSplit.TRAIN, "val": DataSplit.VAL, "test": DataSplit.TEST}
+SNAPSHOT_VERSION = 1
+logger = logging.getLogger(__name__)
+
+
+class DatasetStatisticsUnavailable(RuntimeError):
+    pass
 
 
 class DatasetStatisticsService:
-    def __init__(self, sample_repo: Any, class_repo: Any, s3_client: Any):
+    def __init__(self,
+                 sample_repo: Any,
+                 class_repo: Any,
+                 dataset_repo: Any,
+                 s3_client: Any):
         self.samples = sample_repo
         self.classes = class_repo
+        self.datasets = dataset_repo
         self.s3 = s3_client
 
-    def get_statistics(
-        self,
-        dataset_id: int,
-        task: TaskType,
-        grid_size: int = 20,
-    ) -> dict:
-        if (
-            isinstance(grid_size, bool)
-            or not isinstance(grid_size, int)
-            or grid_size < 1
-        ):
+    def get_statistics(self,
+                       dataset_id: int,
+                       task: TaskType,
+                       grid_size: int = 20,
+                       *, public_id: str | None = None) -> dict:
+        if (isinstance(grid_size, bool) or not isinstance(grid_size, int) or grid_size < 1):
             raise ValueError("Размер сетки должен быть положительным целым числом")
 
-        class_names = self.classes.get_names(dataset_id)
-        self._populate_missing_geometries(dataset_id, class_names, task)
+        dataset = self.datasets.get_by_id(dataset_id)
+        if dataset is None or (public_id is not None and dataset.public_id != public_id):
+            raise DatasetStatisticsUnavailable("Датасет больше недоступен.")
+        public_id = dataset.public_id
+        prefix, *legacy_prefixes = dataset_storage_prefixes(dataset)
+        key = dataset_statistics_key(prefix, grid_size)
+        legacy_key = dataset_statistics_key(legacy_prefixes[0], grid_size) if legacy_prefixes else None
+        for _ in range(4):
+            current = self.datasets.get_statistics_revision(dataset_id)
+            if current is None or current[0] != public_id:
+                break
+            _, revision = current
+            metadata = {
+                "version": SNAPSHOT_VERSION,
+                "public_id": public_id,
+                "revision": revision,
+                "task": task.value,
+                "grid_size": grid_size,
+            }
+            cached = self._read_snapshot(key, metadata)
+            if cached is not None:
+                if self.datasets.get_statistics_revision(dataset_id) == current:
+                    return {**cached, "dataset_id": dataset_id}
+                continue
 
+            statistics = self._read_snapshot(legacy_key, metadata) if legacy_key else None
+            if statistics is None:
+                try:
+                    class_names = self.classes.get_names(dataset_id)
+                    if self._populate_missing_geometries(dataset_id, class_names, task):
+                        # Backfilling legacy geometry changes the revision too.
+                        continue
+                    statistics = self._calculate_statistics(dataset_id, task, grid_size, class_names)
+                except ValueError:
+                    if self.datasets.get_statistics_revision(dataset_id) != current:
+                        continue
+                    raise
+            with self.datasets.lock_statistics_revision(dataset_id, public_id, revision) as current_revision:
+                if current_revision:
+                    self._write_snapshot(key, metadata, statistics)
+                    return {**statistics, "dataset_id": dataset_id}
+
+        raise DatasetStatisticsUnavailable("Датасет изменился во время расчёта статистики. Повторите запрос.")
+
+    def _read_snapshot(self, key: str, metadata: dict) -> dict | None:
+        try:
+            raw = self.s3.get_bytes(key)
+        except Exception:
+            logger.warning("Could not read statistics snapshot %s", key, exc_info=True)
+            return None
+        if raw is None:
+            return None
+        try:
+            snapshot = json.loads(raw)
+            if snapshot["metadata"] != metadata:
+                return None
+            statistics = snapshot["statistics"]
+            DatasetStatisticsDTO.model_validate(statistics)
+            return statistics
+        except (KeyError, TypeError, ValueError):
+            logger.warning("Ignoring invalid statistics snapshot %s", key)
+            return None
+
+    def _write_snapshot(self, key: str, metadata: dict, statistics: dict) -> None:
+        try:
+            data = DatasetStatisticsDTO.model_validate({**statistics, "dataset_id": metadata["public_id"]})
+            snapshot = {"metadata": metadata, "statistics": data.model_dump(mode="json")}
+            raw = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self.s3.put_bytes(key, raw, content_type="application/json")
+        except Exception:
+            logger.warning("Could not save statistics snapshot %s", key, exc_info=True)
+
+    def _calculate_statistics(self, dataset_id: int, task: TaskType,
+                              grid_size: int, class_names: list[str]) -> dict:
         names_for_library = [
             f"dataset_class_{class_id}" for class_id in range(len(class_names))
         ] or ["dataset_class_empty"]
         category = make_category_enum(names_for_library)
+        labeled_counts: Counter[str] = Counter()
+        status_counts: dict[str, Counter[str]] = {name: Counter() for name in SPLITS}
         with scratch_dir(prefix=f"hub_statistics_{dataset_id}_") as root:
             samples_by_split = self._build_library_dataset(
                 root=root,
@@ -47,6 +135,8 @@ class DatasetStatisticsService:
                 names=names_for_library,
                 category=category,
                 class_count=len(class_names),
+                labeled_counts=labeled_counts,
+                status_counts=status_counts,
             )
             config = Config(
                 root=root,
@@ -89,28 +179,26 @@ class DatasetStatisticsService:
                 for class_id in range(len(class_names))
             ]
             split_statistics = {
-                "train": self._serialize_split_statistics(
-                    statistics.train,
+                name: self._serialize_split_statistics(
+                    getattr(statistics, name),
                     class_names,
                     names_for_library,
-                ),
-                "val": self._serialize_split_statistics(
-                    statistics.val,
-                    class_names,
-                    names_for_library,
-                ),
-                "test": self._serialize_split_statistics(
-                    statistics.test,
-                    class_names,
-                    names_for_library,
-                ),
+                    labeled_counts[name],
+                    status_counts[name],
+                )
+                for name in SPLITS
             }
+            all_status_counts: Counter[str] = Counter()
+            for counts in status_counts.values():
+                all_status_counts.update(counts)
 
             return {
                 "dataset_id": dataset_id,
                 "task": task.value,
                 "grid_size": grid_size,
                 "image_count": image_counts["all"],
+                "labeled_count": labeled_counts.total(),
+                "status_counts": dict(all_status_counts),
                 "images_by_split": image_counts,
                 "annotation_count": label_counts["all"],
                 "annotations_per_class": class_statistics,
@@ -122,11 +210,11 @@ class DatasetStatisticsService:
             }
 
     @staticmethod
-    def _serialize_split_statistics(
-        split_statistics: Any,
-        class_names: list[str],
-        names_for_library: list[str],
-    ) -> dict | None:
+    def _serialize_split_statistics(split_statistics: Any,
+                                    class_names: list[str],
+                                    names_for_library: list[str],
+                                    labeled_count: int,
+                                    status_counts: Counter[str]) -> dict | None:
         if split_statistics is None:
             return None
 
@@ -144,6 +232,8 @@ class DatasetStatisticsService:
 
         return {
             "image_count": split_statistics.count,
+            "labeled_count": labeled_count,
+            "status_counts": dict(status_counts),
             "annotation_count": label_counts["all"],
             "annotations_per_class": [
                 {key: value for key, value in item.items() if key != "heatmap"}
@@ -155,17 +245,17 @@ class DatasetStatisticsService:
             },
         }
 
-    def _build_library_dataset(
-        self,
-        root: Path,
-        dataset_id: int,
-        task: TaskType,
-        names: list[str],
-        category: type,
-        class_count: int,
-    ) -> dict[DataSplit, list[Sample]]:
+    def _build_library_dataset(self,
+                               root: Path,
+                               dataset_id: int,
+                               task: TaskType,
+                               names: list[str],
+                               category: type,
+                               class_count: int,
+                               labeled_counts: Counter[str],
+                               status_counts: dict[str, Counter[str]]) -> dict[DataSplit, list[Sample]]:
         directories: dict[str, tuple[Path, Path]] = {}
-        for split_name in ("train", "val", "test"):
+        for split_name in SPLITS:
             images_dir = root / split_name / "images"
             labels_dir = root / split_name / "labels"
             images_dir.mkdir(parents=True)
@@ -181,13 +271,11 @@ class DatasetStatisticsService:
 
         for row in self.samples.iter_statistics_rows(dataset_id):
             split_name = "val" if row.split == "valid" else row.split
-            split = {
-                "train": DataSplit.TRAIN,
-                "val": DataSplit.VAL,
-                "test": DataSplit.TEST,
-            }.get(split_name)
+            split = SPLITS.get(split_name)
             if split is None:
                 raise ValueError(f"Неизвестный сплит датасета: {row.split}")
+            labeled_counts[split_name] += int(row.is_labeled)
+            status_counts[split_name][row.status] += 1
 
             geometries = json.loads(row.geometry_json) if row.geometry_json else []
             if not isinstance(geometries, list):
@@ -226,7 +314,6 @@ class DatasetStatisticsService:
                 annotation_dtos,
                 task=task,
                 class_names=names,
-                category=category,
             )
             images_dir, labels_dir = directories[split_name]
             label_path = labels_dir / f"{row.id}.txt"
@@ -246,12 +333,10 @@ class DatasetStatisticsService:
 
         return samples_by_split
 
-    def _populate_missing_geometries(
-        self,
-        dataset_id: int,
-        class_names: list[str],
-        task: TaskType,
-    ) -> None:
+    def _populate_missing_geometries(self,
+                                     dataset_id: int,
+                                     class_names: list[str],
+                                     task: TaskType) -> bool:
         missing_rows = self.samples.list_missing_geometries(dataset_id)
         for index, sample in enumerate(missing_rows, start=1):
             raw_label = self.s3.get_bytes(sample.label_key) or b""
@@ -271,8 +356,9 @@ class DatasetStatisticsService:
                 item.model_dump(mode="json")
                 for item in instances_to_dtos(instances, task)
             ]
-            self.samples.set_geometries(sample.id, geometries, commit=False)
+            self.samples.set_missing_geometries(sample.id, geometries)
             if index % 100 == 0:
                 self.samples.commit()
         if missing_rows:
             self.samples.commit()
+        return bool(missing_rows)
