@@ -230,3 +230,8 @@ HttpOnly-cookie `consent_visitor_id`; согласие не привязано �
 
 Публичный `GET /api/privacy-policy` отдаёт `title`, `subtitle` и текст Политики;
 frontend отображает его на странице `/privacy-policy`.
+
+## Развёртывание на сервере
+
+Инструкция по запуску на Ubuntu VPS с Docker Compose, PostgreSQL и HTTPS:
+[deploy/README.md](deploy/README.md).
