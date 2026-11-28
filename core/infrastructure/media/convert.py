@@ -23,9 +23,16 @@ def validate_image_header(content: bytes) -> None:
         raise ValueError("Изображение слишком большое или пустое")
     try:
         with Image.open(BytesIO(content)) as image:
+            if image.format not in {"JPEG", "PNG", "WEBP", "BMP", "TIFF", "HEIF", "HEIC"}:
+                raise ValueError("Неподдерживаемое содержимое изображения")
             width, height = image.size
             if width < 1 or height < 1 or width * height > 40_000_000:
                 raise ValueError("Изображение превышает ограничение 40 млн пикселей")
+            image.verify()
+        # verify() checks container integrity; decoding catches truncated rasters.
+        # Dimensions were bounded before this allocation.
+        with Image.open(BytesIO(content)) as image:
+            image.load()
     except (OSError, Image.DecompressionBombError) as exc:
         raise ValueError("Некорректное изображение") from exc
 
@@ -54,6 +61,11 @@ def normalize_image_file(src_path: Path,
         raise ValueError(f"Изображение слишком большое: {src_path.name}")
 
     validate_image_header(file_bytes)
+
+    with Image.open(BytesIO(file_bytes)) as image:
+        expected = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG"}.get(ext)
+        if expected is not None and image.format != expected:
+            raise ValueError("Содержимое изображения не соответствует расширению")
 
     if ext in KEEP_EXTENSIONS:
         content_type = "image/png" if ext == ".png" else "image/jpeg"

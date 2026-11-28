@@ -11,6 +11,7 @@ from io import BytesIO
 from typing import Any
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -43,6 +44,9 @@ MAX_AVATAR_BYTES = 5 * 1024 * 1024
 MAX_AVATAR_PIXELS = 40_000_000
 AVATAR_SIZE = (512, 512)
 _ATTEMPTS: dict[str, list[float]] = {}
+_ATTEMPTS_LOCK = Lock()
+LOGIN_ATTEMPT_LIMIT = 10
+LOGIN_ATTEMPT_WINDOW = 600
 
 
 def _client_ip(request: Request) -> str:
@@ -50,12 +54,25 @@ def _client_ip(request: Request) -> str:
 
 
 def _limit(bucket: str, limit: int = 10, window: int = 600) -> None:
-    now = time.monotonic()
-    hits = [item for item in _ATTEMPTS.get(bucket, []) if now - item < window]
-    if len(hits) >= limit:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Слишком много попыток")
-    hits.append(now)
-    _ATTEMPTS[bucket] = hits
+    _limit_buckets((bucket,), limit, window)
+
+
+def _limit_buckets(buckets: tuple[str, ...], limit: int, window: int) -> None:
+    with _ATTEMPTS_LOCK:
+        now = time.monotonic()
+        for key in list(_ATTEMPTS):
+            if not _ATTEMPTS[key] or now - _ATTEMPTS[key][-1] >= window:
+                del _ATTEMPTS[key]
+        current = {key: [hit for hit in _ATTEMPTS.get(key, []) if now - hit < window]
+                   for key in buckets}
+        if any(len(hits) >= limit for hits in current.values()):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Слишком много попыток. Повторите вход через 10 минут",
+                headers={"Retry-After": str(window)},
+            )
+        for key, hits in current.items():
+            _ATTEMPTS[key] = hits + [now]
 
 
 def _yandex_state() -> str:
@@ -92,7 +109,15 @@ def _profile_with_avatar(profile: dict[str, Any],
 
 
 def _normalize_avatar(content: bytes) -> bytes:
+    if not content or len(content) > MAX_AVATAR_BYTES:
+        raise ValueError("Размер аватара не должен превышать 5 МБ")
     try:
+        with Image.open(BytesIO(content)) as probe:
+            if probe.format not in {"JPEG", "PNG", "WEBP"}:
+                raise ValueError("Поддерживаются только изображения JPEG, PNG и WebP")
+            if min(probe.size) < 1 or probe.width * probe.height > MAX_AVATAR_PIXELS:
+                raise ValueError("Изображение слишком большое")
+            probe.verify()
         with Image.open(BytesIO(content)) as source:
             if source.format not in {"JPEG", "PNG", "WEBP"}:
                 raise ValueError("Поддерживаются только изображения JPEG, PNG и WebP")
@@ -104,10 +129,11 @@ def _normalize_avatar(content: bytes) -> bytes:
             image.thumbnail(AVATAR_SIZE, Image.Resampling.LANCZOS)
             mode = "RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB"
             image = image.convert(mode)
+            image.info.clear()
             output = BytesIO()
             image.save(output, format="WEBP", quality=86, method=5)
             return output.getvalue()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
         raise ValueError("Не удалось прочитать изображение. Выберите JPEG, PNG или WebP") from exc
 
 
@@ -138,7 +164,10 @@ def register(payload: RegisterRequest,
 def login(payload: LoginRequest,
           request: Request,
           service: AuthService = Depends(get_auth_service)):
-    _limit(f"login:{_client_ip(request)}:{payload.email.strip().lower()}")
+    _limit_buckets(
+        (f"login-ip:{_client_ip(request)}", f"login-account:{payload.email.strip().lower()}"),
+        LOGIN_ATTEMPT_LIMIT, LOGIN_ATTEMPT_WINDOW,
+    )
     try:
         return service.authenticate(email=payload.email, password=payload.password)
     except PermissionError as exc:
