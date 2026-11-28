@@ -469,7 +469,11 @@ def complete_upload(request: Request,
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=client_error(exc)) from exc
 
-    raw_bytes = s3.get_bytes(req.upload_key)
+    try:
+        raw_bytes = s3.get_bytes(req.upload_key, max_bytes=25 * 1024 * 1024)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=client_error(exc)) from exc
     if not raw_bytes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Загруженный файл не найден в S3")
 

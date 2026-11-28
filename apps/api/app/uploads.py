@@ -26,7 +26,7 @@ async def spool_upload(upload: UploadFile,
                 if total > limit:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="Файл слишком большой",
+                        detail="Размер ZIP-датасета не должен превышать 5 ГиБ",
                     )
                 output.write(chunk)
     except Exception:

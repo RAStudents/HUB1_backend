@@ -14,7 +14,7 @@ from acmenra_cv import TaskType
 from acmenra_ds import Config, Dataset, DatasetLayout, make_category_enum
 
 from core.config import LOCAL_API_BASE_URL
-from core.infrastructure.cv.thumbs import render_thumbnail_array
+from core.infrastructure.cv.thumbs import render_thumbnail_array, read_image_unicode
 from core.infrastructure.media.yaml_safe import load_yaml_file
 
 logger = logging.getLogger(__name__)
@@ -31,20 +31,6 @@ def read_text_safe(path: Path) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", errors="replace")
-
-
-def read_image_unicode(path: Path) -> np.ndarray | None:
-    try:
-        path_obj = Path(path)
-        if not path_obj.is_file():
-            return None
-        raw_bytes = path_obj.read_bytes()
-        if not raw_bytes:
-            return None
-        buf = np.frombuffer(raw_bytes, dtype=np.uint8)
-        return cv2.imdecode(buf, cv2.IMREAD_COLOR)
-    except Exception:
-        return None
 
 
 def write_image_unicode(path: Path,
@@ -148,10 +134,16 @@ def load_acmenra_dataset(yaml_or_dir_path: Path,
                 root / "images").exists() else DatasetLayout.DIRECT
 
     train_path = raw_cfg.get("train", "train")
+    if not isinstance(train_path, str):
+        raise ValueError("Путь train должен быть строкой")
+    if "\\" in train_path or ":" in train_path or Path(train_path).is_absolute() or ".." in Path(train_path).parts:
+        raise ValueError("Путь train должен находиться внутри датасета")
     if isinstance(train_path, str):
         train_path = train_path.strip().lstrip("./")
         if train_path.startswith("images/"):
             train_path = train_path.replace("images/", "", 1)
+    if not (root / train_path).resolve().is_relative_to(root.resolve()):
+        raise ValueError("Путь train выходит за пределы датасета")
 
     val_candidate = "valid" if (root / "valid").exists() else "val"
     has_val = (root / val_candidate).exists() or (root / "images" / val_candidate).exists()
