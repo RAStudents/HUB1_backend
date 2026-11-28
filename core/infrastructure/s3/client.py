@@ -195,7 +195,8 @@ class S3Client:
         return key
 
     def get_bytes(self,
-                  key: str) -> bytes | None:
+                  key: str,
+                  max_bytes: int | None = None) -> bytes | None:
         key = self.validate_key(key)
         if self.is_remote:
             try:
@@ -207,13 +208,24 @@ class S3Client:
                 raise
             body = response["Body"]
             try:
-                return body.read()
+                if max_bytes is not None and response.get("ContentLength", 0) > max_bytes:
+                    raise ValueError("Изображение превышает ограничение 25 МиБ")
+                data = body.read() if max_bytes is None else body.read(max_bytes + 1)
+                if max_bytes is not None and len(data) > max_bytes:
+                    raise ValueError("Изображение превышает ограничение 25 МиБ")
+                return data
             finally:
                 body.close()
         file_path = self.safe_path(key)
         if not file_path.is_file():
             return None
-        return file_path.read_bytes()
+        if max_bytes is None:
+            return file_path.read_bytes()
+        with file_path.open("rb") as source:
+            data = source.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise ValueError("Изображение превышает ограничение 25 МиБ")
+        return data
 
     def delete(self,
                key: str) -> None:
